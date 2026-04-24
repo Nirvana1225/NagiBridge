@@ -704,6 +704,28 @@ public class ModEntry : Mod
                 return entry;
             }).ToList();
 
+        var menuInfo = (object?)null;
+        if (Game1.activeClickableMenu != null)
+        {
+            var menuType = Game1.activeClickableMenu.GetType().Name;
+            var dialogueText = "";
+            if (Game1.activeClickableMenu is StardewValley.Menus.DialogueBox db)
+            {
+                try { dialogueText = db.getCurrentString() ?? ""; } catch { }
+            }
+            menuInfo = new
+            {
+                type = menuType,
+                dialogue = string.IsNullOrEmpty(dialogueText) ? null : dialogueText
+            };
+        }
+
+        var eventInfo = loc.currentEvent != null ? new
+        {
+            id = loc.currentEvent.id,
+            skippable = loc.currentEvent.skippable
+        } : (object?)null;
+
         return new
         {
             ok = true,
@@ -743,6 +765,8 @@ public class ModEntry : Mod
                 season = Game1.currentSeason,
                 year = Game1.year
             },
+            activeMenu = menuInfo,
+            activeEvent = eventInfo,
             npcs,
             inventory
         };
@@ -1255,21 +1279,51 @@ public class ModEntry : Mod
             try
             {
                 var farmer = Game1.player;
-                var bed = farmer.GetBoundingBox();
 
-                // Find the farmer's home location and bed position
-                var homeLoc = Game1.getLocationFromName(farmer.homeLocation.Value ?? "FarmHouse")
-                              ?? farmer.currentLocation;
+                // Find home: try homeLocation, then scan all locations for a cabin belonging to this farmer
+                var homeName = farmer.homeLocation.Value;
+                GameLocation homeLoc = null;
+                if (!string.IsNullOrEmpty(homeName))
+                    homeLoc = Game1.getLocationFromName(homeName);
 
-                // Use the built-in sleep method
-                if (farmer.currentLocation.Name != homeLoc.Name)
+                if (homeLoc == null)
                 {
-                    // Warp home first
-                    Game1.warpFarmer(homeLoc.Name, 10, 6, false);
+                    // Scan for cabin with this farmer's unique ID
+                    foreach (var loc in Game1.locations)
+                    {
+                        if (loc is StardewValley.Locations.Cabin cabin && cabin.owner == farmer)
+                        {
+                            homeLoc = cabin;
+                            homeName = cabin.Name;
+                            break;
+                        }
+                    }
                 }
 
-                // Trigger sleep after a short delay to let warp complete
-                var delay = farmer.currentLocation.Name != homeLoc.Name ? 1000 : 100;
+                // Fallback to FarmHouse for host
+                if (homeLoc == null)
+                {
+                    homeLoc = Game1.getLocationFromName("FarmHouse");
+                    homeName = "FarmHouse";
+                }
+
+                if (homeLoc == null)
+                {
+                    tcs.SetResult(new { ok = false, error = "Cannot find home location" });
+                    return;
+                }
+
+                var bedX = 10;
+                var bedY = 6;
+
+                var needsWarp = farmer.currentLocation.Name != homeLoc.Name;
+                if (needsWarp)
+                {
+                    Game1.warpFarmer(homeName, bedX, bedY, false);
+                }
+
+                // Longer delay for farmhand warp sync
+                var delay = needsWarp ? 3000 : 500;
                 DelayedAction.functionAfterDelay(() =>
                 {
                     var f = Game1.player;
@@ -1277,20 +1331,18 @@ public class ModEntry : Mod
                     f.sleptInTemporaryBed.Value = false;
                     f.currentLocation.answerDialogueAction("Sleep_Yes", Array.Empty<string>());
 
-                    // Auto-confirm the "yes" dialogue after another short delay
                     DelayedAction.functionAfterDelay(() =>
                     {
                         if (Game1.activeClickableMenu != null)
                         {
-                            // Try to confirm the sleep dialogue
                             Game1.player.currentLocation.answerDialogueAction("Sleep_Yes", Array.Empty<string>());
                             Game1.pressActionButton(Game1.input.GetKeyboardState(), Game1.input.GetMouseState(),
                                 Game1.input.GetGamePadState());
                         }
-                    }, 500);
+                    }, 1000);
                 }, delay);
 
-                tcs.SetResult(new { ok = true, action = "sleeping", home = homeLoc.Name });
+                tcs.SetResult(new { ok = true, action = "sleeping", home = homeName, bed = $"{bedX},{bedY}" });
             }
             catch (Exception ex)
             {
@@ -1435,22 +1487,35 @@ public class ModEntry : Mod
                     {
                         case "confirm":
                         case "action":
-                            // Simulate pressing the action/confirm button
-                            Game1.pressActionButton(Game1.input.GetKeyboardState(), Game1.input.GetMouseState(),
-                                Game1.input.GetGamePadState());
+                            if (Game1.activeClickableMenu != null)
+                            {
+                                Game1.activeClickableMenu.receiveLeftClick(
+                                    Game1.getMouseX(), Game1.getMouseY());
+                            }
+                            else if (Game1.currentLocation?.currentEvent != null)
+                            {
+                                Game1.currentLocation.currentEvent.skipped = true;
+                                Game1.currentLocation.currentEvent.skipEvent();
+                            }
+                            else if (Game1.input != null)
+                            {
+                                Game1.pressActionButton(Game1.input.GetKeyboardState(), Game1.input.GetMouseState(),
+                                    Game1.input.GetGamePadState());
+                            }
                             break;
                         case "cancel":
                         case "back":
                         case "menu":
-                            Game1.pressUseToolButton();
+                            if (Game1.activeClickableMenu != null)
+                                Game1.activeClickableMenu.receiveKeyPress(Keys.Escape);
+                            else if (Game1.input != null)
+                                Game1.pressUseToolButton();
                             break;
                         case "skip":
                         case "escape":
                             Game1.currentMinigame?.receiveKeyPress(Keys.Escape);
                             if (Game1.activeClickableMenu != null)
                                 Game1.activeClickableMenu.receiveKeyPress(Keys.Escape);
-                            else
-                                Game1.activeClickableMenu?.exitThisMenu();
                             break;
                     }
                 }

@@ -70,6 +70,29 @@ PYTHONIOENCODING=utf-8 python3 harvest.py <x1> <y1> <x2> <y2> --sell --port 7843
 
 ---
 
-## mine — 挖矿（待完善）
+## mine — 挖矿
 
-脚本: scripts/mine_run.py
+warp传送进矿洞 → 逐层扫描敲石头 → 传送下一层 → 低血量/体力不足自动撤退回农场
+战斗由 AutoCombat mod 自动处理，脚本不需要管怪物。
+
+### 执行
+```bash
+PYTHONIOENCODING=utf-8 python3 mine_run.py --start-level 1 --max-levels 5 --hp-threshold 30 --port 7842
+```
+
+### 参数
+- `--start-level` 从第几层开始（默认1）
+- `--max-levels` 最多挖几层（默认5）
+- `--hp-threshold` 血量百分比低于此值时warp回农场（默认30）
+- `--port` NagiBridge端口
+
+### 流程
+1. warp 到 `UndergroundMine{N}` 直接传送到指定层
+2. 扫描周围矿石/石头 → 走过去用镐敲（每个3下）
+3. 当前层没石头了 → warp 下一层
+4. 血量 < 阈值 或 体力 < 15 → warp 回 Farm
+
+### 注意
+- 不需要手动走到矿洞入口，全程warp传送
+- AutoCombat mod 会自动处理怪物战斗
+- 挖矿前确保背包有镐子且有空位装矿石

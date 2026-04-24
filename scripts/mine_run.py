@@ -1,25 +1,25 @@
 """
-挖矿脚本：进入矿洞 → 逐层挖掘 → 低血量自动撤退
+挖矿脚本：warp传送进矿洞 → 逐层扫描敲石头 → 传送下一层 → 低血量自动撤退
 
 用法:
-    python mine_run.py [--hp-threshold 30] [--max-levels 5]
+    PYTHONIOENCODING=utf-8 python3 mine_run.py [--start-level 1] [--max-levels 5] [--hp-threshold 30] [--port 7842]
 
 参数:
+    --start-level   从第几层开始（默认 1）
+    --max-levels    最多挖几层（默认 5）
     --hp-threshold  血量百分比低于此值时撤退（默认 30）
-    --max-levels    最多挖几层就返回（默认 5）
+    --port          NagiBridge端口（默认 7842）
 """
 
 import sys
+import os
 import time
 import argparse
-import stardew_api as api
+import requests
 
-# ── 配置 ──
-TOOL_DELAY = 0.7
-SCAN_RADIUS = 8
-RETREAT_EMOTE = 52  # angry emote 表示撤退
+TOOL_DELAY = 0.8
+SCAN_RADIUS = 12
 
-# 矿石/石头的物品名（surroundings 返回的 object 字段）
 MINEABLE_OBJECTS = {"Stone", "Copper Node", "Iron Node", "Gold Node", "Iridium Node",
                     "Mystic Stone", "Gem Node", "Diamond Node", "Amethyst Node",
                     "Topaz Node", "Emerald Node", "Aquamarine Node", "Jade Node",
@@ -27,247 +27,211 @@ MINEABLE_OBJECTS = {"Stone", "Copper Node", "Iron Node", "Gold Node", "Iridium N
                     "Magma Geode Node", "Omni Geode Node"}
 
 
-def check_health(threshold_pct):
-    """检查血量，返回 True 表示安全。"""
-    hp, max_hp = api.player_health()
-    pct = (hp / max_hp) * 100 if max_hp > 0 else 0
-    api.log(f"  血量: {hp}/{max_hp} ({pct:.0f}%)")
-    return pct >= threshold_pct
+def log(msg):
+    try:
+        print(f"[mine] {msg}", flush=True)
+    except UnicodeEncodeError:
+        print(f"[mine] {msg.encode('utf-8', errors='replace').decode('utf-8')}", flush=True)
 
 
-def check_stamina(threshold=10):
-    """检查体力是否足够。"""
-    sta, max_sta = api.player_stamina()
-    return sta >= threshold
+class MineBot:
+    def __init__(self, port):
+        self.base = f"http://localhost:{port}"
 
+    def _get(self, ep, params=None):
+        return requests.get(f"{self.base}{ep}", params=params, timeout=10).json()
 
-def find_minable_tiles():
-    """扫描周围，返回可挖掘的 (x, y, name) 列表，按距离排序。"""
-    data = api.surroundings(SCAN_RADIUS)
-    px, py = data["center"]["x"], data["center"]["y"]
-    targets = []
+    def _post(self, ep, data=None):
+        return requests.post(f"{self.base}{ep}", json=data or {}, timeout=10).json()
 
-    for tile in data.get("tiles", []):
-        obj = tile.get("object")
-        if obj and obj in MINEABLE_OBJECTS:
-            dist = abs(tile["x"] - px) + abs(tile["y"] - py)
-            targets.append((tile["x"], tile["y"], obj, dist))
+    def status(self):
+        return self._get("/status")
 
-    targets.sort(key=lambda t: t[3])
-    return [(x, y, name) for x, y, name, _ in targets]
+    def state(self):
+        return self._get("/state")
 
+    def warp(self, location, x=-1, y=-1):
+        d = {"location": location}
+        if x >= 0: d["x"] = x
+        if y >= 0: d["y"] = y
+        return self._post("/warp", d)
 
-def find_ladder():
-    """扫描周围，寻找梯子（Ladder / Shaft）。"""
-    data = api.surroundings(SCAN_RADIUS)
-    for tile in data.get("tiles", []):
-        obj = tile.get("object", "")
-        if "Ladder" in obj or "Shaft" in obj:
-            return tile["x"], tile["y"]
-    return None
-
-
-def find_passable_neighbor(tx, ty):
-    """找到目标格旁边一个可通行的格子用于站立。"""
-    data = api.surroundings(SCAN_RADIUS)
-    blocked = set()
-    for tile in data.get("tiles", []):
-        if not tile.get("passable", True):
-            blocked.add((tile["x"], tile["y"]))
-
-    # 上下左右四个邻居
-    for dx, dy, face_dir in [(0, -1, 2), (0, 1, 0), (-1, 0, 1), (1, 0, 3)]:
-        nx, ny = tx + dx, ty + dy
-        if (nx, ny) not in blocked:
-            return nx, ny, face_dir
-    return None
-
-
-def mine_tile(tx, ty, name):
-    """移动到石头旁，面向它，用镐敲碎。"""
-    neighbor = find_passable_neighbor(tx, ty)
-    if neighbor is None:
-        api.log(f"  无法靠近 ({tx},{ty}) {name}，跳过")
+    def move_to(self, x, y):
+        self._post("/move", {"x": x, "y": y})
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            s = self.state()
+            if not s.get("player", {}).get("isMoving", False):
+                return True
+            time.sleep(0.25)
+        self._post("/stop")
         return False
 
-    nx, ny, face_dir = neighbor
-    api.move_to(nx, ny)
-    api.face(face_dir)
-    time.sleep(0.15)
+    def face(self, direction):
+        self._post("/face", {"direction": direction})
 
-    # 多敲几下（大石头可能需要）
-    for _ in range(3):
-        api.use_tool("Pickaxe")
-        api.wait_tool_animation(TOOL_DELAY)
+    def use_tool(self, name):
+        self._post("/tool", {"name": name})
 
-    return True
+    def select(self, name):
+        return self._post("/select", {"name": name})
 
+    def surroundings(self, radius=12):
+        return self._get("/surroundings", {"radius": radius})
 
-def go_to_mine_entrance():
-    """尝试前往矿洞入口。"""
-    loc = api.current_location()
-    api.log(f"当前位置: {loc}")
+    def player_hp(self):
+        s = self.state()
+        p = s["player"]
+        return p["health"], p["maxHealth"]
 
-    if loc == "Mine":
-        api.log("已在矿洞中")
-        return True
+    def player_stamina(self):
+        s = self.state()
+        p = s["player"]
+        return p["stamina"], p["maxStamina"]
 
-    if loc == "Mountain":
-        api.log("在山区，走向矿洞入口...")
-        api.move_to(54, 5)  # 矿洞入口大致位置
-        time.sleep(0.5)
-        api.interact()
-        time.sleep(1.5)
-        return api.current_location() != "Mountain"
+    def location(self):
+        return self.state()["location"]["name"]
 
-    if loc == "Farm":
-        api.log("在农场，先去山区...")
-        api.move_to(69, 2)  # 农场北出口大致位置
-        time.sleep(2)
-        if api.current_location() == "Mountain":
-            return go_to_mine_entrance()
+    def find_mineable(self):
+        data = self.surroundings(SCAN_RADIUS)
+        px = data["center"]["x"]
+        py = data["center"]["y"]
+        targets = []
+        for t in data.get("tiles", []):
+            obj = t.get("object")
+            if obj and obj in MINEABLE_OBJECTS:
+                dist = abs(t["x"] - px) + abs(t["y"] - py)
+                targets.append((t["x"], t["y"], obj, dist))
+        targets.sort(key=lambda t: t[3])
+        return [(x, y, name) for x, y, name, _ in targets]
 
-    api.log(f"从 {loc} 出发可能无法自动到矿洞，请手动走到 Mountain 或 Mine 再运行")
-    return False
+    def find_passable_neighbor(self, tx, ty):
+        data = self.surroundings(SCAN_RADIUS)
+        blocked = set()
+        for t in data.get("tiles", []):
+            if not t.get("passable", True):
+                blocked.add((t["x"], t["y"]))
+        for dx, dy, face_dir in [(0, 1, 0), (0, -1, 2), (-1, 0, 1), (1, 0, 3)]:
+            nx, ny = tx + dx, ty + dy
+            if (nx, ny) not in blocked:
+                return nx, ny, face_dir
+        return None
 
+    def hp_pct(self):
+        hp, max_hp = self.player_hp()
+        return (hp / max_hp * 100) if max_hp > 0 else 0
 
-def retreat():
-    """撤退：离开矿洞。"""
-    api.log("!!! 血量过低，撤退 !!!")
-    api.emote(RETREAT_EMOTE)
-    api.chat("血量不行了，先撤！")
+    def stamina_val(self):
+        sta, _ = self.player_stamina()
+        return sta
 
-    loc = api.current_location()
-    if "Mine" in loc or "UndergroundMine" in loc:
-        # 尝试找梯子向上走，或者用回城杖
-        # 最简单的方式：使用 Return Scepter 或 Farm Warp Totem
-        for escape_item in ["Return Scepter", "Farm Warp Totem", "Warp Totem: Farm"]:
-            result = api.select(escape_item)
-            if result.get("ok"):
-                api.log(f"使用 {escape_item} 回城")
-                api.use_item()
-                time.sleep(2)
-                return True
+    def game_time(self):
+        s = self.state()
+        return s.get("time", {}).get("timeOfDay", 600)
 
-        # 没有传送道具，尝试找到楼梯向上
-        api.log("没有传送道具，尝试向矿洞入口移动...")
-        # MineShaft 入口通常在左上角附近
-        api.move_to(6, 3)
-        time.sleep(1)
-        api.interact()
-        time.sleep(1.5)
+    def is_safe(self, hp_threshold):
+        hp_ok = self.hp_pct() >= hp_threshold
+        sta_ok = self.stamina_val() >= 15
+        time_ok = self.game_time() < 2300
+        if not hp_ok:
+            log(f"  hp too low ({self.hp_pct():.0f}%)")
+        if not sta_ok:
+            log(f"  stamina too low ({self.stamina_val()})")
+        if not time_ok:
+            log(f"  too late ({self.game_time()}), time to go home")
+        return hp_ok and sta_ok and time_ok
 
-    return True
+    def emergency_retreat(self):
+        log("  !!! RETREAT → warp to Farm !!!")
+        self.warp("Farm")
 
-
-def mine_current_level(hp_threshold):
-    """在当前层挖矿，返回 True 表示安全完成，False 表示需要撤退。"""
-    api.log(f"--- 开始挖掘 [{api.current_location()}] ---")
-
-    max_attempts = 30
-    attempt = 0
-
-    while attempt < max_attempts:
-        attempt += 1
-
-        # 血量检查
-        if not check_health(hp_threshold):
-            return False
-
-        # 体力检查
-        if not check_stamina():
-            api.log("体力不足，停止挖掘")
-            return False
-
-        # 先看有没有梯子
-        ladder = find_ladder()
-        if ladder:
-            api.log(f"  发现梯子 ({ladder[0]},{ladder[1]})，下楼！")
-            api.move_to(ladder[0], ladder[1])
-            time.sleep(0.3)
-            api.interact()
-            time.sleep(1.5)
-            return True
-
-        # 扫描可挖目标
-        targets = find_minable_tiles()
-        if not targets:
-            api.log("  没有可挖的石头了，扫描更大范围...")
-            time.sleep(0.5)
-            # 扩大搜索或随机移动
-            break
-
-        # 挖最近的几个
-        mined = 0
-        for tx, ty, name in targets[:5]:
-            if not check_health(hp_threshold):
-                return False
-
-            api.log(f"  挖掘 {name} ({tx},{ty})")
-            if mine_tile(tx, ty, name):
-                mined += 1
-
-        if mined == 0:
-            break
-
-    # 最后再检查一次梯子
-    ladder = find_ladder()
-    if ladder:
-        api.log(f"  发现梯子 ({ladder[0]},{ladder[1]})")
-        api.move_to(ladder[0], ladder[1])
-        time.sleep(0.3)
-        api.interact()
-        time.sleep(1.5)
-        return True
-
-    api.log("  本层没找到梯子，可能需要继续敲石头")
-    return True
+    def mine_tile(self, tx, ty, name, hp_threshold=30):
+        neighbor = self.find_passable_neighbor(tx, ty)
+        if neighbor is None:
+            log(f"  cannot reach ({tx},{ty}) {name}, skip")
+            return "skip"
+        nx, ny, face_dir = neighbor
+        self.move_to(nx, ny)
+        self.face(face_dir)
+        time.sleep(0.15)
+        for _ in range(3):
+            if not self.is_safe(hp_threshold):
+                self.emergency_retreat()
+                return "retreat"
+            self.use_tool("Pickaxe")
+            time.sleep(TOOL_DELAY)
+        return "ok"
 
 
-def run(hp_threshold, max_levels):
-    api.log("=== 挖矿脚本启动 ===")
-    api.log(f"血量撤退阈值: {hp_threshold}%，最大层数: {max_levels}")
+def run(port, start_level, max_levels, hp_threshold):
+    bot = MineBot(port)
 
-    # 确保手持镐子
-    result = api.select("Pickaxe")
-    if not result.get("ok"):
-        api.log("背包里没有镐子！")
+    st = bot.status()
+    if not st.get("worldReady"):
+        log("world not ready")
         return
 
-    # 前往矿洞
-    if not go_to_mine_entrance():
-        return
+    bot.select("Pickaxe")
+    log(f"=== mine run: levels {start_level}-{start_level + max_levels - 1}, hp threshold {hp_threshold}% ===")
 
-    levels_done = 0
-    while levels_done < max_levels:
-        if not check_health(hp_threshold):
-            retreat()
+    for i in range(max_levels):
+        level = start_level + i
+        loc_name = f"UndergroundMine{level}"
+
+        log(f"--- warp to level {level} ---")
+        result = bot.warp(loc_name)
+        if not result.get("ok"):
+            log(f"  warp failed: {result.get('error', '?')}")
+            log("  trying 'Mine' entrance instead...")
+            result = bot.warp("Mine")
+            if not result.get("ok"):
+                log(f"  cannot reach mine, abort")
+                return
             break
 
-        safe = mine_current_level(hp_threshold)
-        if not safe:
-            retreat()
-            break
+        time.sleep(1.5)
 
-        levels_done += 1
-        api.log(f"=== 已完成 {levels_done}/{max_levels} 层 ===")
+        if not bot.is_safe(hp_threshold):
+            bot.emergency_retreat()
+            return
 
-    api.log(f"=== 挖矿结束，共挖了 {levels_done} 层 ===")
+        attempts = 0
+        max_attempts = 20
+        while attempts < max_attempts:
+            attempts += 1
+
+            if not bot.is_safe(hp_threshold):
+                bot.emergency_retreat()
+                return
+
+            targets = bot.find_mineable()
+            if not targets:
+                log("  no more rocks, next level")
+                break
+
+            for tx, ty, name in targets[:5]:
+                if not bot.is_safe(hp_threshold):
+                    bot.emergency_retreat()
+                    return
+
+                log(f"  mining {name} ({tx},{ty})")
+                result = bot.mine_tile(tx, ty, name, hp_threshold)
+                if result == "retreat":
+                    return
+
+        log(f"=== level {level} done ({i+1}/{max_levels}) ===")
+
+    log(f"=== mine run complete ===")
+    bot.warp("Farm")
+    log("warped home")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="星露谷自动挖矿脚本")
-    parser.add_argument("--hp-threshold", type=int, default=30, help="血量百分比撤退阈值")
-    parser.add_argument("--max-levels", type=int, default=5, help="最多挖几层")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=7842)
+    parser.add_argument("--start-level", type=int, default=1)
+    parser.add_argument("--max-levels", type=int, default=5)
+    parser.add_argument("--hp-threshold", type=int, default=30)
     args = parser.parse_args()
 
-    try:
-        st = api.status()
-        if not st.get("worldReady"):
-            api.log("游戏世界未就绪，请先进入游戏")
-            sys.exit(1)
-    except Exception as e:
-        api.log(f"无法连接 NagiBridge: {e}")
-        sys.exit(1)
-
-    run(args.hp_threshold, args.max_levels)
+    run(args.port, args.start_level, args.max_levels, args.hp_threshold)
