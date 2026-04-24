@@ -64,6 +64,21 @@ echo "Game ready!"
 - 用 `/key confirm` 推进对话
 - 对话可能有多页，反复调 `/key confirm` 直到 activeMenu 变回 null
 
+## 钓鱼
+Fishbot mod 已安装，F5 开关自动钓鱼。流程：
+1. 确保背包有鱼竿（初始有 Bamboo Pole）
+2. warp 到钓鱼点：
+   - 海边: `{"location":"Beach"}`
+   - 山湖: `{"location":"Mountain"}`
+   - 森林河: `{"location":"Forest"}`
+   - 矿洞湖: `{"location":"Mine"}`
+3. 走到水边面朝水面
+4. 用 `/key` 模拟按 F5 启动 Fishbot（或提醒里奈手动按 F5）
+5. Fishbot 会自动甩竿、玩 minigame、钓宝箱、体力低自动吃食物
+6. 背包快满了就停下来，把鱼存箱子或卖掉
+
+注意：钓鱼前确保背包有空位，鱼竿要在手上（用 /select 切换）
+
 ## git 同步
 代码更新后先 `git pull`，如果 DLL 变了就重启游戏。
 
