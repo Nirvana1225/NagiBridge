@@ -12,22 +12,13 @@ def get_kegs():
     return [m for m in data.get("machines", []) if m["name"] == MACHINE_NAME]
 
 
-def interact_with_machine(mx, my):
-    api.move_to(mx, my - 1, timeout=20)
-    time.sleep(0.3)
-    api.face(2)  # face down
-    time.sleep(0.2)
-    api.interact()
-    time.sleep(0.5)
-
-
 def collect_ready(kegs):
     collected = 0
     for k in kegs:
         if k["status"] != "ready":
             continue
         api.log(f"Collecting from keg at ({k['x']},{k['y']}): {k.get('heldItem','?')}")
-        interact_with_machine(k["x"], k["y"])
+        api.interact_machine(k["x"], k["y"])
         collected += 1
     return collected
 
@@ -49,7 +40,7 @@ def load_empty(kegs, fruit_name):
         api.log(f"Loading {fruit_name} into keg at ({k['x']},{k['y']})")
         api.select(fruit_name)
         time.sleep(0.3)
-        interact_with_machine(k["x"], k["y"])
+        api.interact_machine(k["x"], k["y"])
         fruit_count -= 1
         loaded += 1
     return loaded
@@ -80,11 +71,11 @@ def run(fruit_name, sell_products=False):
         api.log(f"Loaded {n} kegs")
 
     if sell_products:
-        api.log("Warping to farm to sell...")
-        api.warp("Farm")
-        time.sleep(1)
+        api.log("Walking to shipping bin...")
+        api.move_to(api.SHIPPING_BIN[0], api.SHIPPING_BIN[1] - 1, timeout=15)
+        time.sleep(0.5)
         api.sell(sell_all=True)
-        api.log("Sold all items in shipping bin")
+        api.log("Sold")
 
     api.log("Done!")
 

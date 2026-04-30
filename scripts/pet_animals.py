@@ -26,12 +26,7 @@ def run():
 
     for a in unpetted:
         api.log(f"Petting {a['name']}...")
-        api.move_to(a["x"], a["y"] - 1, timeout=20)
-        time.sleep(0.3)
-        api.face(2)
-        time.sleep(0.2)
-        api.interact()
-        time.sleep(0.5)
+        api.interact_machine(a["x"], a["y"])
 
         m = api.menu()
         if m.get("open"):

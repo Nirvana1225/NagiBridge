@@ -19,22 +19,13 @@ def get_furnaces():
     return [m for m in data.get("machines", []) if m["name"] == MACHINE_NAME]
 
 
-def interact_with_machine(mx, my):
-    api.move_to(mx, my - 1, timeout=20)
-    time.sleep(0.3)
-    api.face(2)
-    time.sleep(0.2)
-    api.interact()
-    time.sleep(0.5)
-
-
 def collect_ready(furnaces):
     collected = 0
     for f in furnaces:
         if f["status"] != "ready":
             continue
         api.log(f"Collecting from furnace at ({f['x']},{f['y']}): {f.get('heldItem','?')}")
-        interact_with_machine(f["x"], f["y"])
+        api.interact_machine(f["x"], f["y"])
         collected += 1
     return collected
 
@@ -63,7 +54,7 @@ def load_empty(furnaces, ore_name):
         api.log(f"Loading {ore_name} into furnace at ({f['x']},{f['y']})")
         api.select(ore_name)
         time.sleep(0.3)
-        interact_with_machine(f["x"], f["y"])
+        api.interact_machine(f["x"], f["y"])
         batches -= 1
         loaded += 1
     return loaded

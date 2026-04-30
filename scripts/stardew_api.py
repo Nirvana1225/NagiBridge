@@ -174,6 +174,47 @@ def wait_tool_animation(seconds=0.6):
     time.sleep(seconds)
 
 
+# ── Farm layout constants ──
+SHIPPING_BIN = (71, 14)
+CHEST_POS = (72, 14)
+FURNACE_START = (72, 15)  # furnaces line up below chest
+
+
+def face_toward(tx, ty):
+    """Calculate face direction from actual player position to target tile."""
+    s = state()
+    px, py = s["player"]["x"], s["player"]["y"]
+    dx, dy = tx - px, ty - py
+    if dx == 0 and dy == 0:
+        return 2
+    if abs(dx) > abs(dy):
+        return 1 if dx > 0 else 3
+    return 2 if dy > 0 else 0
+
+
+def interact_machine(mx, my):
+    """Walk to a machine and interact — tries multiple angles until facing matches."""
+    approaches = [(mx, my+1), (mx, my-1), (mx-1, my), (mx+1, my)]
+    for nx, ny in approaches:
+        move_to(nx, ny, timeout=10)
+        time.sleep(0.2)
+        d = face_toward(mx, my)
+        face(d)
+        time.sleep(0.15)
+        s = state()
+        px, py = s["player"]["x"], s["player"]["y"]
+        fd = s["player"]["facingDirection"]
+        fdx = [0, 1, 0, -1][fd]
+        fdy = [-1, 0, 1, 0][fd]
+        if px + fdx == mx and py + fdy == my:
+            interact()
+            time.sleep(0.5)
+            return True
+    interact()
+    time.sleep(0.5)
+    return False
+
+
 def log(msg):
     try:
         print(f"[NagiBridge] {msg}", flush=True)
