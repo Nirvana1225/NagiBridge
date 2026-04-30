@@ -176,8 +176,8 @@ def wait_tool_animation(seconds=0.6):
 
 # ── Farm layout constants ──
 SHIPPING_BIN = (71, 14)
-CHEST_POS = (72, 14)
-FURNACE_START = (72, 15)  # furnaces line up below chest
+CHEST_POSITIONS = [(70, 14), (69, 14)]
+FURNACE_POSITIONS = [(73, 14), (74, 14)]
 
 
 def face_toward(tx, ty):
