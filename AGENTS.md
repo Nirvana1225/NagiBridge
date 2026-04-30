@@ -11,8 +11,8 @@
 ## 可用脚本
 - farm_row.py — 种田（翻地+播种+浇水，蛇形走位）
 - water_crops.py — 浇水（蛇形走位+实时水量检测）
-- chop_trees.py — 砍树（动态朝向+验证对准再砍）
-- clear_area.py — 开垦（清杂草/石头/树）
+- chop_trees.py — 砍树（warp精准站位，树干+树桩一口气砍完）
+- clear_area.py — 开垦（两轮：move_to粗清 + warp精补）
 - harvest.py — 收割（--sell 可出售）
 - mine_run.py — 挖矿
 - keg_manager.py — 酿酒桶（扫描→收成品→装水果→卖）
@@ -46,6 +46,27 @@
 6. move_to 寻路可能落点偏1格 → 操作前用 face_toward() 根据实际位置算朝向，不要硬编码方向
 7. 砍树/浇水等操作前验证 facing tile 是否 == 目标 tile，对不上就换角度
 8. 水壶水量用 watering_can_water() 实时检测，不要硬编码补水时机
+9. **精确站位用 warp** → 放置/拆除/砍树等需要精准对齐的操作，用 `warp("Farm", x, y)` 代替 move_to
+10. **砍树要砍树桩** → 树干倒了之后还有树桩，要继续砍（总共约15-18下），砍完走过去捡木头
+11. **开垦两轮清扫** → Pass 1 move_to 粗清 + Pass 2 warp 精补，最后再扫一次确认
+12. **背包满 /give /craft 静默掉落** → give/craft 前先检查背包空间，满了物品会掉地上
+13. **存箱子用 /store** → 需要传箱子坐标 `{x, y, name}`，不是 interact 箱子
+14. **大树桩(LargeStump)需铜斧** → 基础斧子砍不动
+
+## 农场布局（y=14 生产线）
+```
+箱子  箱子  [Bin]  熔炉  熔炉  酒桶  酒桶  酒桶
+(69)  (70)  (71)  (73)  (74)  (75)  (76)  (77)
+```
+扩产往右接着摆或往下开新行。坐标图见桌面 `farm_map.txt`。
+
+### 存取箱子
+```bash
+# 存入（指定箱子坐标 + 物品名）
+curl -X POST http://localhost:7842/store -d '{"x":70,"y":14,"name":"Wood"}'
+# 存所有非工具物品
+curl -X POST http://localhost:7842/store -d '{"x":70,"y":14}'
+```
 
 ## 协作
 操作前先读 scripts/coordination.json 看凪在干什么，避免重复。做完了更新你的状态。
