@@ -1,4 +1,4 @@
-"""Chop trees — find nearby trees, chop with dynamic facing from actual position."""
+"""Chop trees — warp precision, chop trunk + stump in one go."""
 
 import argparse
 import os
@@ -12,8 +12,9 @@ args = parser.parse_args()
 os.environ["NAGI_URL"] = f"http://localhost:{args.port}"
 import stardew_api as api
 
-MAX_HITS = 15
-HIT_DELAY = 0.7
+TRUNK_HITS = 12
+STUMP_HITS = 6
+HIT_DELAY = 0.65
 STAMINA_RESERVE = 10
 
 
@@ -30,79 +31,66 @@ def find_trees(radius=20):
     return trees
 
 
-def tree_still_there(tx, ty):
+def tile_has(tx, ty, check):
     data = api.surroundings(3)
     for t in data.get("tiles", []):
-        if t["x"] == tx and t["y"] == ty and t.get("terrain", "").startswith("Tree:"):
-            return True
+        if t["x"] == tx and t["y"] == ty:
+            terrain = t.get("terrain", "")
+            obj = t.get("object", "")
+            if check == "tree" and terrain.startswith("Tree:"):
+                return True
+            if check == "stump" and (obj == "Twig" or terrain.startswith("Tree:")):
+                return True
     return False
 
 
-def face_toward(tx, ty):
-    s = api.state()
-    px, py = s["player"]["x"], s["player"]["y"]
-    dx, dy = tx - px, ty - py
-    if dx == 0 and dy == 0:
-        return 2
-    if abs(dx) > abs(dy):
-        return 1 if dx > 0 else 3
-    return 2 if dy > 0 else 0
-
-
-def try_chop(tx, ty):
-    approaches = [
-        (tx, ty + 1),
-        (tx, ty - 1),
-        (tx - 1, ty),
-        (tx + 1, ty),
-    ]
-
+def chop_at(tx, ty, hits):
+    """Warp next to target, face it, swing axe."""
+    api.warp("Farm", tx, ty - 1)
+    time.sleep(0.8)
+    api.face(2)
+    time.sleep(0.15)
     api.select("Axe")
     time.sleep(0.15)
 
-    for nx, ny in approaches:
-        arrived = api.move_to(nx, ny, timeout=8)
-        if not arrived:
-            continue
+    for hit in range(hits):
+        cur, _ = api.player_stamina()
+        if cur < STAMINA_RESERVE:
+            api.log(f"  Stamina low ({cur:.0f})")
+            return "stamina"
+        api.use_tool("Axe")
+        time.sleep(HIT_DELAY)
 
-        time.sleep(0.2)
-        direction = face_toward(tx, ty)
-        api.face(direction)
-        time.sleep(0.15)
+    return "done"
 
-        # verify we're actually facing the tree
-        s = api.state()
-        px, py = s["player"]["x"], s["player"]["y"]
-        fd = s["player"]["facingDirection"]
-        face_dx = [0, 1, 0, -1][fd]
-        face_dy = [-1, 0, 1, 0][fd]
-        facing_x, facing_y = px + face_dx, py + face_dy
-        if facing_x != tx or facing_y != ty:
-            api.log(f"  At ({px},{py}) facing ({facing_x},{facing_y}), tree at ({tx},{ty}) — skip this angle")
-            continue
 
-        api.log(f"  Chopping from ({px},{py}) facing dir={fd}")
-        for hit in range(MAX_HITS):
-            cur, mx = api.player_stamina()
-            if cur < STAMINA_RESERVE:
-                api.log(f"  Stamina low ({cur:.0f})")
-                return "stamina"
+def chop_tree(tx, ty):
+    api.log(f"  Chopping trunk...")
+    result = chop_at(tx, ty, TRUNK_HITS)
+    if result == "stamina":
+        return "stamina"
 
-            api.use_tool("Axe")
-            time.sleep(HIT_DELAY)
+    # walk over to pick up wood drops
+    api.warp("Farm", tx, ty)
+    time.sleep(0.5)
 
-            if hit > 0 and hit % 5 == 0:
-                if not tree_still_there(tx, ty):
-                    return "chopped"
+    # check for stump and chop it too
+    if tile_has(tx, ty, "stump") or tile_has(tx, ty, "tree"):
+        api.log(f"  Stump remaining, chopping...")
+        result = chop_at(tx, ty, STUMP_HITS)
+        if result == "stamina":
+            return "stamina"
+        # pick up stump drops
+        api.warp("Farm", tx, ty)
+        time.sleep(0.5)
 
-        if not tree_still_there(tx, ty):
-            return "chopped"
-
-    return "failed"
+    if tile_has(tx, ty, "tree"):
+        return "failed"
+    return "chopped"
 
 
 def run():
-    api.log(f"=== Chop Trees (max {args.count}) ===")
+    api.log(f"=== Chop Trees (max {args.count}, warp mode) ===")
 
     s = api.state()
     inv = s.get("inventory", [])
@@ -117,20 +105,15 @@ def run():
             break
 
         tx, ty, ttype, dist = trees[0]
-        api.log(f"Tree #{chopped+1}: ({tx},{ty}) {ttype} dist={dist}")
+        api.log(f"Tree #{chopped+1}: ({tx},{ty}) {ttype}")
 
-        result = try_chop(tx, ty)
+        result = chop_tree(tx, ty)
         api.log(f"  Result: {result}")
 
         if result == "chopped":
             chopped += 1
-            time.sleep(0.3)
-            api.move_to(tx, ty, timeout=5)
-            time.sleep(0.5)
         elif result == "stamina":
             break
-        elif result == "failed":
-            api.log(f"  Couldn't reach tree at ({tx},{ty}), skipping")
 
     s = api.state()
     inv = s.get("inventory", [])

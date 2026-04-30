@@ -40,7 +40,7 @@ TOOL_MAP = {
     "Grass": ("Scythe", 1),
     "Stone": ("Pickaxe", 2),
     "Twig": ("Axe", 1),
-    "Tree": ("Axe", 12),
+    "Tree": ("Axe", 18),
     "LargeStump": ("Axe", 15),
     "LargeLog": ("Axe", 15),
     "LargeBoulder": ("Pickaxe", 10),
