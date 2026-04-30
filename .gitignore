@@ -3,3 +3,5 @@ obj/
 __pycache__/
 *.pyc
 *.pdb
+node_modules/
+chat_outbox.txt

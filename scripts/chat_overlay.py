@@ -11,11 +11,13 @@ Stardew Valley Chat Overlay — 跟随游戏窗口的聊天气泡，只显示最
 import argparse
 import ctypes
 import json
+import os
 import queue
 import threading
 import time
 import tkinter as tk
 import tkinter.font as tkfont
+import urllib.request
 from dataclasses import dataclass, field
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -56,7 +58,8 @@ def find_game_window():
     result = [None]
     def callback(hwnd, _):
         if win32gui.IsWindowVisible(hwnd):
-            if "Stardew Valley" in win32gui.GetWindowText(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            if "Stardew Valley" in title and not title.startswith("SMAPI"):
                 result[0] = hwnd
                 return False
         return True
@@ -151,51 +154,47 @@ class ChatOverlay:
 
         self.root.update_idletasks()
 
+    CHANNEL_URL = "http://127.0.0.1:9000"
+    OUTBOX_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chat_outbox.txt")
+
     def _on_send(self, event=None):
         text = self.input_var.get().strip()
         if not text:
             return
         self.input_var.set("")
-        msg = {"sender": "里奈", "text": text, "time": time.time()}
-        self.inbox.append(msg)
         self.show_message("里奈", text)
-        self._write_inbox_file(msg)
+        threading.Thread(target=self._send_to_channel, args=(text,), daemon=True).start()
 
-    def _write_inbox_file(self, msg):
-        import os, subprocess
-        inbox_path = os.path.expanduser("~/nagi/overlay_inbox.jsonl")
-        os.makedirs(os.path.dirname(inbox_path), exist_ok=True)
-        with open(inbox_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-        self._poke_terminal()
-
-    def _poke_terminal(self):
-        """Send 'o\\n' to CC terminal window to trigger UserPromptSubmit hook."""
+    def _send_to_channel(self, text):
+        """POST到channel server，由MCP通知CC唤醒"""
         try:
-            def find_cc_terminal():
-                result = [None]
-                def cb(hwnd, _):
-                    if win32gui.IsWindowVisible(hwnd):
-                        cls = win32gui.GetClassName(hwnd)
-                        if cls == "CASCADIA_HOSTING_WINDOW_CLASS":
-                            title = win32gui.GetWindowText(hwnd)
-                            if "Stardew" not in title:
-                                result[0] = hwnd
-                                return False
-                    return True
-                try:
-                    win32gui.EnumWindows(cb, None)
-                except:
-                    pass
-                return result[0]
+            data = json.dumps({"message": text, "chat_id": "game1"}).encode()
+            req = urllib.request.Request(
+                self.CHANNEL_URL,
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception as e:
+            print(f"[channel] send failed: {e}", flush=True)
 
-            hwnd = find_cc_terminal()
-            if hwnd:
-                win32gui.PostMessage(hwnd, win32con.WM_CHAR, ord("o"), 0)
-                win32gui.PostMessage(hwnd, win32con.WM_CHAR, ord("k"), 0)
-                win32gui.PostMessage(hwnd, win32con.WM_KEYDOWN, 0x0D, 0)
-        except Exception:
-            pass
+    def _poll_outbox(self):
+        """轮询outbox文件，有新回复就显示气泡"""
+        last_ts = 0
+        while True:
+            try:
+                if os.path.exists(self.OUTBOX_PATH):
+                    with open(self.OUTBOX_PATH, "r", encoding="utf-8") as f:
+                        data = json.loads(f.read())
+                    ts = data.get("ts", 0)
+                    if ts > last_ts:
+                        last_ts = ts
+                        text = data.get("text", "")
+                        if text:
+                            self.root.after(0, lambda t=text: self.show_message("凪", t))
+            except Exception:
+                pass
+            time.sleep(1)
 
     def _sender_color(self, sender):
         s = sender.lower()
@@ -275,7 +274,7 @@ class ChatOverlay:
         gl, gt, gr, gb = self.game_rect
         w = self.root.winfo_width()
         h = self.root.winfo_height()
-        x = gr - w
+        x = gl
         y = gb - h
         self.root.geometry(f"+{x}+{y}")
 
@@ -336,6 +335,9 @@ class ChatOverlay:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         print(f"Chat overlay running on port {self.port}", flush=True)
+
+        threading.Thread(target=self._poll_outbox, daemon=True).start()
+        print(f"Outbox polling: {self.OUTBOX_PATH}", flush=True)
 
         self.root.after(100, self.track_game_window)
         self.root.after(50, self.process_queue)

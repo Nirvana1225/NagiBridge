@@ -116,6 +116,37 @@ Fishbot mod 已安装，F5 开关自动钓鱼。流程：
 
 注意：钓鱼前确保背包有空位，鱼竿要在手上（用 /select 切换）
 
+## 游戏内聊天（MCP Channel）
+
+里奈可以通过游戏overlay直接跟你聊天，不用看终端。
+
+### 架构
+```
+[气泡 tkinter:7850] → POST → [channel server:9000] → MCP通知 → CC唤醒
+CC回复 → reply tool → chat_outbox.txt → 气泡轮询显示
+```
+
+### 启动
+1. CC启动时加载channel：`claude --dangerously-load-development-channels server:game-overlay`
+2. 启动气泡：`python scripts/chat_overlay.py`
+3. channel server由MCP自动启动（配置在 `.mcp.json`）
+
+### 文件
+- `server.ts` — MCP channel server（端口9000），接收气泡POST，通过MCP通知CC
+- `scripts/chat_overlay.py` — tkinter透明气泡，跟随游戏窗口左下角，输入框+气泡显示
+- `.mcp.json` — MCP server配置
+- `chat_outbox.txt` — CC回复的中转文件（reply tool写入，气泡轮询读取）
+
+### 收到channel消息时
+- 消息格式：`<channel source="game-overlay" chat_id="game1">内容</channel>`
+- 用 `reply` tool 回复，传回 chat_id 和 text
+- 如果是游戏操作指令（种田、浇水等），先执行再reply结果
+
+### 气泡HTTP API（端口7850，仍可用）
+- `POST /message` — 直接推送气泡：`{"sender":"凪","text":"..."}`
+- `GET /inbox` — 读取里奈输入（旧接口，channel模式下不用）
+- `POST /clear` — 清除气泡
+
 ## git 同步
 代码更新后先 `git pull`，如果 DLL 变了就重启游戏。
 
