@@ -58,8 +58,8 @@ def find_game_window():
     result = [None]
     def callback(hwnd, _):
         if win32gui.IsWindowVisible(hwnd):
-            title = win32gui.GetWindowText(hwnd)
-            if "Stardew Valley" in title and not title.startswith("SMAPI"):
+            cls = win32gui.GetClassName(hwnd)
+            if cls == "SDL_app":
                 result[0] = hwnd
                 return False
         return True
