@@ -1,5 +1,5 @@
 """
-开垦skill：扫描区域 → 按工具分组 → 批量清除障碍物
+开垦skill：扫描区域 → 粗清(move_to) → 重扫 → 精补(warp)
 
 用法:
     python clear_area.py <x1> <y1> <x2> <y2> [options]
@@ -9,12 +9,11 @@
     x2,y2  右下角坐标
 
 选项:
-    --port PORT   NagiBridge端口（默认 7843）
+    --port PORT   NagiBridge端口（默认 7842）
     --hits N      硬目标额外敲击次数（默认 2）
 
 示例:
-    python clear_area.py 50 20 70 30 --port 7843
-    → 清除 (50,20)-(70,30) 区域内所有杂草、石头、树枝、树
+    python clear_area.py 50 20 70 30 --port 7842
 """
 
 import argparse
@@ -27,7 +26,7 @@ parser.add_argument("x1", type=int)
 parser.add_argument("y1", type=int)
 parser.add_argument("x2", type=int)
 parser.add_argument("y2", type=int)
-parser.add_argument("--port", type=int, default=7843)
+parser.add_argument("--port", type=int, default=7842)
 parser.add_argument("--hits", type=int, default=2)
 args = parser.parse_args()
 
@@ -41,11 +40,11 @@ TOOL_MAP = {
     "Grass": ("Scythe", 1),
     "Stone": ("Pickaxe", 2),
     "Twig": ("Axe", 1),
-    "Tree": ("Axe", 3),
-    "LargeStump": ("Axe", 4),
-    "LargeLog": ("Axe", 4),
-    "LargeBoulder": ("Pickaxe", 4),
-    "MeteoriteOre": ("Pickaxe", 4),
+    "Tree": ("Axe", 12),
+    "LargeStump": ("Axe", 15),
+    "LargeLog": ("Axe", 15),
+    "LargeBoulder": ("Pickaxe", 10),
+    "MeteoriteOre": ("Pickaxe", 10),
 }
 
 TOOL_ORDER = ["Scythe", "Pickaxe", "Axe"]
@@ -56,7 +55,8 @@ def scan_area():
     cy = (args.y1 + args.y2) // 2
     radius = max(args.x2 - args.x1, args.y2 - args.y1) // 2 + 5
 
-    api.move_to(cx, cy)
+    api.warp("Farm", cx, cy)
+    time.sleep(1)
     data = api.surroundings(min(radius, 30))
 
     targets = []
@@ -86,45 +86,95 @@ def scan_area():
     return targets
 
 
-def clear_targets(targets):
+def snake_sort(items):
+    rows = defaultdict(list)
+    for item in items:
+        rows[item[1]].append(item)
+    ordered = []
+    for i, y in enumerate(sorted(rows.keys())):
+        row = sorted(rows[y], key=lambda t: t[0])
+        if i % 2 == 1:
+            row.reverse()
+        ordered.extend(row)
+    return ordered
+
+
+def clear_pass(targets, use_warp=False):
     by_tool = defaultdict(list)
     for x, y, tool, name, hits in targets:
         by_tool[tool].append((x, y, name, hits))
 
+    cleared = 0
     for tool in TOOL_ORDER:
         items = by_tool.get(tool, [])
         if not items:
             continue
 
-        items.sort(key=lambda t: (t[1], t[0]))
-        api.log(f"--- {tool}: {len(items)} targets ---")
+        items = snake_sort(items)
+        mode = "warp" if use_warp else "move"
+        api.log(f"--- {tool}: {len(items)} targets ({mode}) ---")
         api.select(tool)
         time.sleep(0.15)
 
         for x, y, name, hits in items:
-            api.move_to(x, y - 1)
-            api.face(2)
+            cur, mx = api.player_stamina()
+            if cur < 8:
+                api.log(f"Stamina empty, stopping")
+                return cleared
+
+            if use_warp:
+                api.warp("Farm", x, y - 1)
+                time.sleep(0.8)
+                api.face(2)
+            else:
+                api.move_to(x, y - 1, timeout=8)
+                d = api.face_toward(x, y)
+                api.face(d)
             time.sleep(0.1)
+
             for h in range(hits):
-                api.use_item()
+                api.use_tool(tool)
                 time.sleep(TOOL_DELAY)
+
+            cleared += 1
+            if cleared % 20 == 0:
+                api.log(f"  {cleared} cleared...")
+
+    return cleared
 
 
 def run():
-    api.log(f"=== clear skill: ({args.x1},{args.y1})-({args.x2},{args.y2}) ===")
+    api.log(f"=== clear area: ({args.x1},{args.y1})-({args.x2},{args.y2}) ===")
 
+    # Pass 1: scan + fast clear with move_to
     targets = scan_area()
-    by_tool = defaultdict(int)
-    for _, _, tool, name, _ in targets:
-        by_tool[tool] += 1
-    api.log(f"found: {dict(by_tool)}, total={len(targets)}")
+    by_type = defaultdict(int)
+    for _, _, _, name, _ in targets:
+        by_type[name] += 1
+    api.log(f"Pass 1: {dict(by_type)}, total={len(targets)}")
 
-    if not targets:
-        api.log("nothing to clear!")
-        return
+    if targets:
+        n = clear_pass(targets, use_warp=False)
+        api.log(f"Pass 1 done: cleared {n}")
 
-    clear_targets(targets)
-    api.log(f"=== done: {len(targets)} obstacles cleared ===")
+    # Pass 2: rescan + precision clear with warp
+    remaining = scan_area()
+    if remaining:
+        by_type = defaultdict(int)
+        for _, _, _, name, _ in remaining:
+            by_type[name] += 1
+        api.log(f"Pass 2 (warp): {dict(by_type)}, total={len(remaining)}")
+        n = clear_pass(remaining, use_warp=True)
+        api.log(f"Pass 2 done: cleared {n}")
+
+        # final check
+        leftover = scan_area()
+        if leftover:
+            api.log(f"Still {len(leftover)} left (may need tool upgrade)")
+        else:
+            api.log("All clear!")
+    else:
+        api.log("All clear after pass 1!")
 
 
 if __name__ == "__main__":
