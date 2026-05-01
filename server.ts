@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 
 const LISTEN_PORT = 9000;
 const CHAT_FILE = "C:\\Users\\syin\\source\\NagiBridge\\chat_outbox.txt";
@@ -18,7 +19,7 @@ const server = new McpServer(
 server.tool(
   "reply",
   "回复游戏overlay里的消息",
-  { chat_id: { type: "string" }, text: { type: "string" } },
+  { chat_id: z.string(), text: z.string() },
   async ({ chat_id, text }) => {
     await Bun.write(CHAT_FILE, JSON.stringify({ chat_id, text, ts: Date.now() }));
     return { content: [{ type: "text", text: `sent to overlay` }] };

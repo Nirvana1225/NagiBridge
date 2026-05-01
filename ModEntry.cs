@@ -21,6 +21,7 @@ using StardewValley.Menus;
 using System.Runtime.InteropServices;
 using xTile.Dimensions;
 using StardewValley.Monsters;
+using HarmonyLib;
 
 namespace NagiBridge;
 
@@ -57,6 +58,11 @@ public class ModEntry : Mod
     private string? _minigameBotLastError;
     private int _minigameBotErrorCooldown;
     private Vector2 _minigameBotLastMove;
+    private readonly HashSet<byte> _pkHeldKeys = new();
+    private bool _pkHarmonyPatched;
+    internal static int[] PkBotMoveDirections = Array.Empty<int>();
+    internal static int[] PkBotShootDirections = Array.Empty<int>();
+    internal static bool PkBotInjecting;
 
     private static Type? _abigailGameType;
     private static Type? _abigailGameReflectedType;
@@ -109,8 +115,38 @@ public class ModEntry : Mod
         if (_timeFrozen && Context.IsWorldReady)
             Game1.timeOfDay = _frozenTime;
 
-        if (_minigameBotActive && IsPrairieKing(Game1.currentMinigame))
+        // Auto-start bot when Prairie King is detected
+        if (IsPrairieKing(Game1.currentMinigame))
         {
+            if (!_minigameBotActive)
+            {
+                _minigameBotActive = true;
+                _minigameBotLastError = null;
+                Monitor.Log("Prairie King detected — bot auto-started", LogLevel.Info);
+            }
+            if (!_pkHarmonyPatched)
+            {
+                try
+                {
+                    var harmony = new Harmony("NagiBridge.PrairieKingBot");
+                    var agType = Game1.currentMinigame!.GetType();
+                    var updateInput = agType.GetMethod("_UpdateInput", BindingFlags.NonPublic | BindingFlags.Instance)
+                        ?? agType.GetMethod("UpdateInput", BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (updateInput != null)
+                    {
+                        harmony.Patch(updateInput, postfix: new HarmonyMethod(typeof(ModEntry), nameof(PkUpdateInputPostfix)));
+                        Monitor.Log($"Harmony patched {updateInput.Name} for bot input injection", LogLevel.Info);
+                    }
+                    else
+                        Monitor.Log("Could not find _UpdateInput method to patch", LogLevel.Warn);
+                    _pkHarmonyPatched = true;
+                }
+                catch (Exception ex)
+                {
+                    Monitor.Log($"Harmony patch failed: {ex.Message}", LogLevel.Error);
+                    _pkHarmonyPatched = true;
+                }
+            }
             try
             {
                 TickPrairieKingBot(Game1.currentMinigame!);
@@ -124,6 +160,13 @@ public class ModEntry : Mod
                     _minigameBotErrorCooldown = 300;
                 }
             }
+        }
+        else if (_minigameBotActive)
+        {
+            _minigameBotActive = false;
+            PkBotInjecting = false;
+            PkBotMoveDirections = Array.Empty<int>();
+            PkBotShootDirections = Array.Empty<int>();
         }
 
         if (_minigameBotErrorCooldown > 0)
@@ -1564,7 +1607,14 @@ public class ModEntry : Mod
                     {
                         case "confirm":
                         case "action":
-                            if (Game1.activeClickableMenu is DialogueBox dialogueBox)
+                            if (Game1.currentMinigame != null)
+                            {
+                                Game1.currentMinigame.receiveKeyPress(Keys.Enter);
+                                keybd_event(0x0D, 0, 0, UIntPtr.Zero);
+                                System.Threading.Thread.Sleep(50);
+                                keybd_event(0x0D, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                            }
+                            else if (Game1.activeClickableMenu is DialogueBox dialogueBox)
                             {
                                 dialogueBox.receiveLeftClick(0, 0);
                             }
@@ -1624,12 +1674,26 @@ public class ModEntry : Mod
                             }
                             break;
                         default:
+                            byte? virtualKey = null;
                             if (key.ToLower().StartsWith("f") && int.TryParse(key.Substring(1), out int fNum) && fNum >= 1 && fNum <= 12)
+                                virtualKey = (byte)(0x70 + fNum - 1);
+                            else if (key.Equals("space", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x20;
+                            else if (key.Equals("enter", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x0D;
+                            else if (key.Equals("up", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x26;
+                            else if (key.Equals("down", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x28;
+                            else if (key.Equals("left", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x25;
+                            else if (key.Equals("right", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x27;
+                            else if (key.Equals("w", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x57;
+                            else if (key.Equals("a", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x41;
+                            else if (key.Equals("s", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x53;
+                            else if (key.Equals("d", StringComparison.OrdinalIgnoreCase)) virtualKey = 0x44;
+                            if (virtualKey.HasValue)
                             {
-                                byte vk = (byte)(0x70 + fNum - 1); // VK_F1=0x70
-                                keybd_event(vk, 0, 0, UIntPtr.Zero);
+                                if (Game1.currentMinigame != null && Enum.TryParse<Keys>(key, true, out var xnaKey))
+                                    Game1.currentMinigame.receiveKeyPress(xnaKey);
+                                keybd_event(virtualKey.Value, 0, 0, UIntPtr.Zero);
                                 System.Threading.Thread.Sleep(50);
-                                keybd_event(vk, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                                keybd_event(virtualKey.Value, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                             }
                             break;
                     }
@@ -2241,7 +2305,16 @@ public class ModEntry : Mod
             inputFields = new
             {
                 movement = _pkPlayerMovementDirectionsField?.Name,
-                shooting = _pkPlayerShootingDirectionsField?.Name
+                shooting = _pkPlayerShootingDirectionsField?.Name,
+                allFields = minigame!.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Where(f => f.FieldType.Name.Contains("List") || f.Name.Contains("irection") || f.Name.Contains("move") || f.Name.Contains("shoot") || f.Name.Contains("input") || f.Name.Contains("key"))
+                    .Select(f => $"{f.FieldType.Name} {f.Name}")
+                    .ToArray(),
+                allMethods = minigame!.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Where(m => m.Name.Contains("Input") || m.Name.Contains("Update") || m.Name.Contains("key") || m.Name.Contains("Key"))
+                    .Select(m => m.Name)
+                    .Distinct()
+                    .ToArray()
             },
             lastMove = new { x = _minigameBotLastMove.X, y = _minigameBotLastMove.Y },
             lastError = _minigameBotLastError
@@ -2277,23 +2350,43 @@ public class ModEntry : Mod
 
         var player = new Vector2(playerBounds.Center.X, playerBounds.Center.Y);
         var move = ChoosePrairieKingMove(player, monsters, bullets, powerups);
-        var moveDirections = DirectionsFromVector(move, 0.25f);
-        SetPrairieKingDirections(game, _pkPlayerMovementDirectionsField, moveDirections);
         _minigameBotLastMove = move;
 
+        // Direct position manipulation — bypass input system entirely
+        if (move != Vector2.Zero && _pkPlayerPositionField != null)
+        {
+            var pos = _pkPlayerPositionField.GetValue(game);
+            if (pos is Vector2 currentPos)
+            {
+                var speed = 3f;
+                var newPos = currentPos + move * speed;
+                newPos.X = Math.Clamp(newPos.X, 8f, 744f);
+                newPos.Y = Math.Clamp(newPos.Y, 8f, 744f);
+                _pkPlayerPositionField.SetValue(game, newPos);
+
+                // Update bounding box to match
+                if (_pkPlayerBoundingBoxField != null)
+                {
+                    var bb = new Microsoft.Xna.Framework.Rectangle(
+                        (int)newPos.X - 12, (int)newPos.Y - 12, 24, 24);
+                    _pkPlayerBoundingBoxField.SetValue(game, bb);
+                }
+            }
+        }
+
+        // Inject shooting directions (may work for bullet spawning even on host)
         var target = monsters
             .Where(m => m.Health != 0)
             .OrderBy(m => Vector2.DistanceSquared(player, new Vector2(m.Bounds.Center.X, m.Bounds.Center.Y)))
             .FirstOrDefault();
 
-        if (target == null)
-        {
-            SetPrairieKingDirections(game, _pkPlayerShootingDirectionsField, Array.Empty<int>());
-            return;
-        }
+        var shootDirs = target != null
+            ? DirectionsFromVector(new Vector2(target.Bounds.Center.X - player.X, target.Bounds.Center.Y - player.Y), 0.15f)
+            : Array.Empty<int>();
 
-        var shootVector = new Vector2(target.Bounds.Center.X - player.X, target.Bounds.Center.Y - player.Y);
-        SetPrairieKingDirections(game, _pkPlayerShootingDirectionsField, DirectionsFromVector(shootVector, 0.15f));
+        PkBotShootDirections = shootDirs;
+        PkBotMoveDirections = DirectionsFromVector(move, 0.25f);
+        PkBotInjecting = true;
         _minigameBotLastError = null;
     }
 
@@ -2397,11 +2490,31 @@ public class ModEntry : Mod
         return best;
     }
 
-    private static void ClearPrairieKingInput(object game)
+    private void ClearPrairieKingInput(object game)
     {
-        EnsurePrairieKingReflection(game);
-        SetPrairieKingDirections(game, _pkPlayerMovementDirectionsField, Array.Empty<int>());
-        SetPrairieKingDirections(game, _pkPlayerShootingDirectionsField, Array.Empty<int>());
+        PkBotInjecting = false;
+        PkBotMoveDirections = Array.Empty<int>();
+        PkBotShootDirections = Array.Empty<int>();
+    }
+
+    internal static void PkUpdateInputPostfix(object __instance)
+    {
+        if (!PkBotInjecting) return;
+        var type = __instance.GetType();
+        var moveField = type.GetField("player2MovementDirections", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? type.GetField("playerMovementDirections", BindingFlags.NonPublic | BindingFlags.Instance);
+        var shootField = type.GetField("player2ShootingDirections", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? type.GetField("playerShootingDirections", BindingFlags.NonPublic | BindingFlags.Instance);
+        if (moveField?.GetValue(__instance) is ICollection<int> moveList)
+        {
+            moveList.Clear();
+            foreach (var d in PkBotMoveDirections) moveList.Add(d);
+        }
+        if (shootField?.GetValue(__instance) is ICollection<int> shootList)
+        {
+            shootList.Clear();
+            foreach (var d in PkBotShootDirections) shootList.Add(d);
+        }
     }
 
     private static void SetPrairieKingDirections(object game, FieldInfo? field, IEnumerable<int> directions)
@@ -2482,8 +2595,8 @@ public class ModEntry : Mod
 
         _pkPlayerPositionField = FirstField(type, instance, "playerPosition", "playerPos");
         _pkPlayerBoundingBoxField = FirstField(type, instance, "playerBoundingBox", "playerBox", "playerBounds");
-        _pkPlayerMovementDirectionsField = FirstField(type, instance, "playerMovementDirections");
-        _pkPlayerShootingDirectionsField = FirstField(type, instance, "playerShootingDirections");
+        _pkPlayerMovementDirectionsField = FirstField(type, instance, "playerMovementDirections", "player2MovementDirections");
+        _pkPlayerShootingDirectionsField = FirstField(type, instance, "playerShootingDirections", "player2ShootingDirections");
         _pkMonstersField = FirstField(type, statik, "monsters")
             ?? FindCollectionField(type, "CowboyMonster", true);
         _pkBulletsField = FirstField(type, instance, "enemyBullets", "monsterBullets", "bullets")

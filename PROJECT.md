@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # NagiBridge — 星露谷 AI Companion 项目总览
 
 ## 一句话
@@ -119,6 +120,8 @@ AI自动玩星露谷内置小游戏。LLM写算法→算法bot每tick执行。
 ---
 
 ## 踩坑记录
+
+### 通用
 1. 万亿参数不会开门 → warp绕过
 2. 熔炉/箱子丢错位置 → 加坐标参数
 3. pyautogui夺舍输入法 → 改用channel server
@@ -127,6 +130,16 @@ AI自动玩星露谷内置小游戏。LLM写算法→算法bot每tick执行。
 6. move_to落点偏1格 → 精确操作用warp
 7. 砍树要砍树桩 → 总共15-18下
 8. 背包满give/craft静默掉落 → 操作前检查空间
+9. 游戏运行时DLL被锁 → 必须先关游戏再复制
+
+### 草原国王Bot专项
+10. 1.6版字段名是 `player2MovementDirections` 不是 `playerMovementDirections` → FirstField多候选名fallback
+11. host玩家移动不从player2方向列表读，直接读键盘 → 反射注入方向列表对host无效
+12. Harmony Postfix注入方向列表：farmhand可能有效，host无效
+13. keybd_event是全局API，按键发给焦点窗口（终端）不是游戏 → 需要PostMessage定向或直接改坐标
+14. SMAPI UpdateTicked在Game.Update之后，设的方向下一帧被_UpdateInput清除 → Harmony Postfix解决时序
+15. 当前方案：直接修改playerPosition绕过输入系统（待验证）
+16. 备选：PostMessage定向发键、用farmhand端口7843测试、直接创建子弹
 
 ---
 
