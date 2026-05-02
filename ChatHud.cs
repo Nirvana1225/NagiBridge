@@ -64,14 +64,18 @@ public class ChatHud
 
     public void Update()
     {
+        if (Context.IsMultiplayer) return;
+
         var keyState = Keyboard.GetState();
         var mouseState = Mouse.GetState();
 
+        bool justOpened = false;
         if (keyState.IsKeyDown(Keys.T) && !_prevKeyState.IsKeyDown(Keys.T)
             && !_isOpen && Game1.activeClickableMenu == null)
         {
             _isOpen = true;
             _scrollOffset = 0;
+            justOpened = true;
         }
         else if (keyState.IsKeyDown(Keys.Escape) && !_prevKeyState.IsKeyDown(Keys.Escape) && _isOpen)
         {
@@ -79,7 +83,7 @@ public class ChatHud
             _inputText = "";
         }
 
-        if (_isOpen)
+        if (_isOpen && !justOpened)
         {
             HandleInput(keyState);
             HandleScroll(mouseState);
@@ -135,7 +139,7 @@ public class ChatHud
 
     public void DrawHud(SpriteBatch b)
     {
-        if (_isOpen || _messages.Count == 0) return;
+        if (Context.IsMultiplayer || _isOpen || _messages.Count == 0) return;
 
         var recent = _messages.TakeLast(HudVisibleMessages).ToList();
         var font = Game1.smallFont;
@@ -159,26 +163,39 @@ public class ChatHud
 
     public void DrawPanel(SpriteBatch b)
     {
-        if (!_isOpen) return;
+        if (!_isOpen || Context.IsMultiplayer) return;
 
         var font = Game1.smallFont;
-        int panelWidth = 500;
-        int panelHeight = 420;
+        int panelWidth = 460;
+        int lineHeight = 26;
+        int padding = 12;
+
+        var visible = GetVisibleMessages();
+        int msgLines = 0;
+        foreach (var msg in visible)
+        {
+            string display = $"[{msg.Time:HH:mm}] {msg.Sender}: {msg.Text}";
+            var wrapped = WrapText(font, display, panelWidth - 32);
+            msgLines += wrapped.Split('\n').Length;
+        }
+        int minMsgLines = 3;
+        msgLines = Math.Max(msgLines, minMsgLines);
+
+        int titleHeight = 30;
+        int msgAreaHeight = msgLines * lineHeight + padding;
+        int inputHeight = 36;
+        int helpHeight = 18;
+        int panelHeight = titleHeight + msgAreaHeight + inputHeight + helpHeight + padding;
+
         int panelX = (Game1.viewport.Width - panelWidth) / 2;
-        int panelY = (Game1.viewport.Height - panelHeight) / 2;
+        int panelY = Game1.viewport.Height - panelHeight - 20;
 
-        DrawBox(b, panelX, panelY, panelWidth, panelHeight, 0.85f);
+        DrawBox(b, panelX, panelY, panelWidth, panelHeight, 0.88f);
 
-        // Title
         b.DrawString(font, "Chat", new Vector2(panelX + 16, panelY + 8), Color.Gold,
             0f, Vector2.Zero, 1f, SpriteEffects.None, 1f);
 
-        // Messages area
-        int msgAreaTop = panelY + 36;
-        int msgAreaHeight = panelHeight - 80;
-        int lineHeight = 28;
-
-        var visible = GetVisibleMessages();
+        int msgAreaTop = panelY + titleHeight;
         int drawY = msgAreaTop;
 
         foreach (var msg in visible)
@@ -206,16 +223,17 @@ public class ChatHud
         }
 
         // Input box
-        int inputY = panelY + panelHeight - 40;
-        DrawBox(b, panelX + 8, inputY, panelWidth - 16, 32, 0.95f);
+        int inputY = panelY + panelHeight - inputHeight - helpHeight;
+        DrawBox(b, panelX + 8, inputY, panelWidth - 16, 30, 0.95f);
 
         string cursor = (_cursorBlink < 30) ? "|" : "";
         string inputDisplay = _inputText + cursor;
-        b.DrawString(font, inputDisplay, new Vector2(panelX + 16, inputY + 6), Color.White,
+        b.DrawString(font, inputDisplay, new Vector2(panelX + 16, inputY + 5), Color.White,
             0f, Vector2.Zero, 1f, SpriteEffects.None, 1f);
 
         // Help text
-        b.DrawString(font, "Enter=Send  Esc=Close  Scroll=History", new Vector2(panelX + 16, panelY + panelHeight - 12),
+        b.DrawString(font, "Enter=Send  Esc=Close  Scroll=History",
+            new Vector2(panelX + 16, panelY + panelHeight - helpHeight),
             Color.Gray, 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 1f);
     }
 

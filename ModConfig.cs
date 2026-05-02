@@ -2,6 +2,8 @@ namespace NagiBridge;
 
 public class ModConfig
 {
+    public string Mode { get; set; } = "cc";
+    public string ChannelServerUrl { get; set; } = "http://localhost:9000/chat";
     public string ApiProvider { get; set; } = "claude";
     public string ApiKey { get; set; } = "";
     public string Model { get; set; } = "claude-sonnet-4-6-20250514";

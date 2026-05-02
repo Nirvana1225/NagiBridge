@@ -76,7 +76,8 @@ public class ModEntry : Mod
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
         helper.Events.GameLoop.ReturnedToTitle += OnReturnedToTitle;
         helper.Events.Display.RenderedHud += OnRenderedHud;
-        helper.Events.Display.RenderedActiveMenu += OnRenderedActiveMenu;
+        helper.Events.Display.Rendered += OnRendered;
+        helper.Events.Input.ButtonPressed += OnButtonPressed;
 
         _chatHud = new ChatHud(Monitor, OnChatSend);
     }
@@ -87,8 +88,18 @@ public class ModEntry : Mod
         {
             try
             {
-                var reply = await _llmClient!.SendAsync(text);
-                _chatHud?.AddMessage("Nagi", reply);
+                if (_modConfig!.Mode.Equals("cc", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var client = new HttpClient();
+                    var json = JsonSerializer.Serialize(new { message = text });
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    await client.PostAsync(_modConfig.ChannelServerUrl, content);
+                }
+                else
+                {
+                    var reply = await _llmClient!.SendAsync(text);
+                    _chatHud?.AddMessage("Nagi", reply);
+                }
             }
             catch (Exception ex)
             {
@@ -103,9 +114,15 @@ public class ModEntry : Mod
         _chatHud?.DrawHud(e.SpriteBatch);
     }
 
-    private void OnRenderedActiveMenu(object? sender, RenderedActiveMenuEventArgs e)
+    private void OnRendered(object? sender, RenderedEventArgs e)
     {
         _chatHud?.DrawPanel(e.SpriteBatch);
+    }
+
+    private void OnButtonPressed(object? sender, ButtonPressedEventArgs e)
+    {
+        if (_chatHud?.IsOpen == true)
+            Helper.Input.Suppress(e.Button);
     }
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
