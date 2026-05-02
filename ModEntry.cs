@@ -63,11 +63,49 @@ public class ModEntry : Mod
     private readonly SpinningWheelBot _spinningWheelBot = new();
     private readonly EggHuntBot _eggHuntBot = new();
 
+    private ChatHud? _chatHud;
+    private ModConfig? _modConfig;
+    private LlmClient? _llmClient;
+
     public override void Entry(IModHelper helper)
     {
+        _modConfig = helper.ReadConfig<ModConfig>();
+        _llmClient = new LlmClient(_modConfig);
+
         helper.Events.GameLoop.GameLaunched += OnGameLaunched;
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
         helper.Events.GameLoop.ReturnedToTitle += OnReturnedToTitle;
+        helper.Events.Display.RenderedHud += OnRenderedHud;
+        helper.Events.Display.RenderedActiveMenu += OnRenderedActiveMenu;
+
+        _chatHud = new ChatHud(Monitor, OnChatSend);
+    }
+
+    private void OnChatSend(string text)
+    {
+        Task.Run(async () =>
+        {
+            try
+            {
+                var reply = await _llmClient!.SendAsync(text);
+                _chatHud?.AddMessage("Nagi", reply);
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"Chat send error: {ex.Message}", LogLevel.Warn);
+                _chatHud?.AddMessage("System", $"[Error: {ex.Message}]");
+            }
+        });
+    }
+
+    private void OnRenderedHud(object? sender, RenderedHudEventArgs e)
+    {
+        _chatHud?.DrawHud(e.SpriteBatch);
+    }
+
+    private void OnRenderedActiveMenu(object? sender, RenderedActiveMenuEventArgs e)
+    {
+        _chatHud?.DrawPanel(e.SpriteBatch);
     }
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
@@ -82,6 +120,8 @@ public class ModEntry : Mod
 
     private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
     {
+        _chatHud?.Update();
+
         // Drain main-thread action queue
         lock (_queueLock)
         {
@@ -471,6 +511,8 @@ public class ModEntry : Mod
                 "/festival" => HandleFestival(),
                 "/festival/interact" => HandleFestivalInteract(ctx),
                 "/festival/answer" => HandleFestivalAnswer(ctx),
+                "/chat/push" => HandleChatPush(ctx),
+                "/chat/history" => HandleChatHistory(),
                 _ => throw new InvalidOperationException($"Unknown endpoint: {path}")
             };
 
@@ -705,6 +747,21 @@ public class ModEntry : Mod
         });
 
         return new { ok = true, message };
+    }
+
+    private object HandleChatPush(HttpListenerContext ctx)
+    {
+        var p = ReadJson(ctx);
+        var sender = p.TryGetValue("sender", out var s) ? s?.ToString() ?? "Nagi" : "Nagi";
+        var message = GetParam<string>(p, "message");
+        _chatHud?.AddMessage(sender, message);
+        return new { ok = true, sender, message };
+    }
+
+    private object HandleChatHistory()
+    {
+        // Returns empty if chatHud not initialized - safe fallback
+        return new { ok = true, messages = Array.Empty<object>() };
     }
 
     /// <summary>
