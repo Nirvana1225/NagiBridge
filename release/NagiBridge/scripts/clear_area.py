@@ -55,11 +55,8 @@ def scan_area():
     cy = (args.y1 + args.y2) // 2
     radius = max(args.x2 - args.x1, args.y2 - args.y1) // 2 + 5
 
-    if api.current_location() == "Farm":
-        api._post("/position", {"x": cx, "y": cy})
-    else:
-        api.warp("Farm", cx, cy)
-    time.sleep(0.6)
+    api.warp("Farm", cx, cy)
+    time.sleep(1)
     data = api.surroundings(min(radius, 30))
 
     targets = []
@@ -126,11 +123,8 @@ def clear_pass(targets, use_warp=False):
                 return cleared
 
             if use_warp:
-                if api.current_location() == "Farm":
-                    api._post("/position", {"x": x, "y": y - 1})
-                else:
-                    api.warp("Farm", x, y - 1)
-                time.sleep(0.3)
+                api.warp("Farm", x, y - 1)
+                time.sleep(0.8)
                 api.face(2)
             else:
                 api.move_to(x, y - 1, timeout=8)

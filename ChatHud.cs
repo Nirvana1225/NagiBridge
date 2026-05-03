@@ -351,6 +351,20 @@ public class ChatHud
 
     private void UpdateChat(KeyboardState keyState, MouseState mouseState)
     {
+        // Tab = switch mode (only when input is empty)
+        if (keyState.IsKeyDown(Keys.Tab) && !_prevKeyState.IsKeyDown(Keys.Tab)
+            && string.IsNullOrEmpty(_inputText))
+        {
+            if (_textInputHooked)
+            {
+                Game1.game1.Window.TextInput -= OnTextInput;
+                _textInputHooked = false;
+            }
+            _state = ChatState.ModeSelect;
+            _modeChosen = false;
+            return;
+        }
+
         bool ctrl = keyState.IsKeyDown(Keys.LeftControl) || keyState.IsKeyDown(Keys.RightControl);
         if (ctrl && keyState.IsKeyDown(Keys.V) && !_prevKeyState.IsKeyDown(Keys.V))
         {
@@ -603,7 +617,7 @@ public class ChatHud
         b.DrawString(font, _inputText + cursorChar, new Vector2(panelX + 16, inputY + 5), Color.White,
             0f, Vector2.Zero, 1f, SpriteEffects.None, 1f);
 
-        b.DrawString(font, "` = Close   Enter = Send   Scroll = History",
+        b.DrawString(font, "` = Close  Enter = Send  Tab = Switch Mode",
             new Vector2(panelX + 16, panelY + panelHeight - helpHeight),
             Color.Gray, 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 1f);
     }
