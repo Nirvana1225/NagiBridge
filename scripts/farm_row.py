@@ -125,11 +125,37 @@ def do_action(tx, ty, tool_or_item, is_watering):
 
 
 def run():
+    # --- Pre-checks ---
+    api.log("=== pre-check ===")
+    errors = api.precheck_farm(args.seed)
+    if errors:
+        for e in errors:
+            api.log(f"FAIL: {e}")
+        api.log("=== pre-check failed, aborting ===")
+        return
+
+    api.clear_menu()
+    api.drain_alerts()
+
     tiles = calc_tiles(args.start_x, args.start_y, args.length,
                        args.dir, args.rows, args.row_spacing)
     flat = flatten_tiles(tiles)
     total = len(flat)
-    api.log(f"=== farm skill: {total} tiles, dir={args.dir}, rows={args.rows}, seed={args.seed} ===")
+
+    blocked = api.precheck_area(flat)
+    if blocked:
+        api.log(f"WARNING: {len(blocked)} blocked tiles detected:")
+        for pos, name in blocked:
+            api.log(f"  ({pos[0]},{pos[1]}): {name}")
+        skip_set = {pos for pos, _ in blocked}
+        flat = [t for t in flat if t not in skip_set]
+        api.log(f"Skipping blocked tiles, {len(flat)} tiles remaining")
+
+    if not flat:
+        api.log("=== no valid tiles, aborting ===")
+        return
+
+    api.log(f"=== farm skill: {len(flat)}/{total} tiles, dir={args.dir}, rows={args.rows}, seed={args.seed} ===")
 
     phases = [("Hoe", "till", False)]
     phases.append((args.seed, "plant", False))
@@ -148,6 +174,8 @@ def run():
                 api.log(f"=== stopped during {phase_name} ===")
                 return
 
+    # --- Post-check ---
+    api.postcheck_menu()
     api.log(f"=== done ===")
 
 

@@ -225,3 +225,64 @@ def log(msg):
         print(f"[NagiBridge] {msg}", flush=True)
     except UnicodeEncodeError:
         print(f"[NagiBridge] {msg.encode('utf-8', errors='replace').decode('utf-8')}", flush=True)
+
+
+# ── Pre-checks ──
+
+def inventory_items():
+    s = state()
+    return s.get("inventory", [])
+
+def has_item(name):
+    return any(i.get("name") == name for i in inventory_items())
+
+def inventory_free_slots():
+    s = state()
+    inv = s.get("inventory", [])
+    total = s.get("player", {}).get("maxItems", 36)
+    return total - len([i for i in inv if i.get("name")])
+
+def clear_menu():
+    for _ in range(10):
+        m = menu()
+        if not m or m.get("type") is None or m.get("type") == "none":
+            return True
+        key("confirm")
+        time.sleep(0.3)
+    return False
+
+def drain_alerts():
+    try:
+        return alerts(peek=False)
+    except:
+        return []
+
+def precheck_farm(seed_name):
+    errors = []
+    if not has_item("Hoe"):
+        errors.append("背包没有锄头")
+    if not has_item(seed_name):
+        errors.append(f"背包没有种子: {seed_name}")
+    if not has_item("Watering Can"):
+        errors.append("背包没有水壶")
+    return errors
+
+def precheck_area(tiles, radius=10):
+    blocked = []
+    data = surroundings(radius)
+    objects = data.get("objects", [])
+    terrain = data.get("terrain", [])
+    resource_clumps = data.get("resourceClumps", [])
+    tile_set = set(tiles)
+    for obj in objects:
+        pos = (obj.get("x"), obj.get("y"))
+        if pos in tile_set:
+            blocked.append((pos, obj.get("name", "object")))
+    for t in terrain:
+        pos = (t.get("x"), t.get("y"))
+        if pos in tile_set and "Tree" in t.get("type", ""):
+            blocked.append((pos, t.get("type", "terrain")))
+    return blocked
+
+def postcheck_menu():
+    clear_menu()

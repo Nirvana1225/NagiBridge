@@ -161,10 +161,21 @@ def run():
         bought = buy_item(item_id, count)
         api.log(f"  Bought {bought}/{count}")
 
-    # Check result
+    # Post-check: verify items in inventory
     s = api.state()
     gold_after = s["player"]["money"]
     api.log(f"Spent: {gold_before - gold_after}g, remaining: {gold_after}g")
+
+    inv_names = [i.get("name", "") for i in s.get("inventory", [])]
+    for item_id, count in items:
+        api.log(f"  Post-check: item {item_id} in inventory: {item_id in ' '.join(inv_names) or 'checking by gold spent'}")
+
+    if gold_before == gold_after and total_needed > 0:
+        api.log("WARNING: no gold spent — purchase may have failed entirely!")
+
+    # Clear any remaining menus
+    api.clear_menu()
+    api.drain_alerts()
 
     # Warp back to a visible farm tile for observation.
     api.log(f"Warping back to Farm ({args.return_x},{args.return_y})...")
