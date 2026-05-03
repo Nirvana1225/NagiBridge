@@ -155,7 +155,28 @@ public class ModEntry : Mod
 
     private void OnReturnedToTitle(object? sender, ReturnedToTitleEventArgs e)
     {
+        ClearMovementState();
+    }
+
+    private void ClearMovementState()
+    {
         _pathQueue = null;
+        _pathTickCooldown = 0;
+        _waitingForMove = false;
+    }
+
+    private void CenterViewportOnFarmer(Farmer farmer)
+    {
+        var loc = farmer.currentLocation;
+        int viewW = Game1.viewport.Width;
+        int viewH = Game1.viewport.Height;
+        int maxX = Math.Max(0, loc.Map.DisplayWidth - viewW);
+        int maxY = Math.Max(0, loc.Map.DisplayHeight - viewH);
+        int vx = (int)farmer.Position.X - viewW / 2;
+        int vy = (int)farmer.Position.Y - viewH / 2;
+
+        Game1.viewport.X = Math.Max(0, Math.Min(maxX, vx));
+        Game1.viewport.Y = Math.Max(0, Math.Min(maxY, vy));
     }
 
     private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
@@ -527,6 +548,7 @@ public class ModEntry : Mod
                 "/queue" => HandleQueue(ctx),
                 "/key" => HandleKey(ctx),
                 "/warp" => HandleWarp(ctx),
+                "/position" => HandlePosition(ctx),
                 "/pause" => HandlePause(),
                 "/resume" => HandleResume(),
                 "/give" => HandleGive(ctx),
@@ -1609,6 +1631,8 @@ public class ModEntry : Mod
                     return;
                 }
 
+                ClearMovementState();
+
                 // If no coordinates given, try to find a reasonable entry point
                 if (x < 0 || y < 0)
                 {
@@ -1630,15 +1654,63 @@ public class ModEntry : Mod
                 }
                 else
                 {
-                    Game1.warpFarmer(location, x, y, false);
+                    var farmer = Game1.player;
+                    if (farmer.currentLocation.Name == location)
+                    {
+                        farmer.Position = new Vector2(x, y) * Game1.tileSize;
+                        CenterViewportOnFarmer(farmer);
+                    }
+                    else
+                    {
+                        Game1.warpFarmer(location, x, y, false);
+                    }
                 }
 
-                tcs.SetResult(new { ok = true, action = "warped", location, x, y });
+                var f = Game1.player;
+                tcs.SetResult(new
+                {
+                    ok = true,
+                    action = "warped",
+                    requested = new { location, x, y },
+                    actual = new { location = f.currentLocation.Name, x = f.TilePoint.X, y = f.TilePoint.Y }
+                });
             }
             catch (Exception ex)
             {
                 tcs.SetResult(new { ok = false, error = ex.Message });
             }
+        });
+        return tcs.Task.GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// POST /position { "x": 10, "y": 15 }
+    /// Sets the farmer position on the current map and centers the camera.
+    /// </summary>
+    private object HandlePosition(HttpListenerContext ctx)
+    {
+        var p = ReadJson(ctx);
+        var x = GetParam<int>(p, "x");
+        var y = GetParam<int>(p, "y");
+
+        if (!Context.IsWorldReady)
+            throw new InvalidOperationException("World not ready");
+
+        var tcs = new TaskCompletionSource<object>();
+        EnqueueMainThread(() =>
+        {
+            ClearMovementState();
+            var farmer = Game1.player;
+            farmer.Position = new Vector2(x, y) * Game1.tileSize;
+            CenterViewportOnFarmer(farmer);
+            tcs.SetResult(new
+            {
+                ok = true,
+                action = "positioned",
+                location = farmer.currentLocation.Name,
+                x = farmer.TilePoint.X,
+                y = farmer.TilePoint.Y
+            });
         });
         return tcs.Task.GetAwaiter().GetResult();
     }
@@ -1798,8 +1870,21 @@ public class ModEntry : Mod
 
     private object HandleStop()
     {
-        _pathQueue = null;
-        return new { ok = true, message = "Movement stopped" };
+        var tcs = new TaskCompletionSource<object>();
+        EnqueueMainThread(() =>
+        {
+            ClearMovementState();
+            var farmer = Game1.player;
+            tcs.SetResult(new
+            {
+                ok = true,
+                message = "Movement stopped",
+                location = farmer.currentLocation.Name,
+                x = farmer.TilePoint.X,
+                y = farmer.TilePoint.Y
+            });
+        });
+        return tcs.Task.GetAwaiter().GetResult();
     }
 
     private object HandlePlaceChest(HttpListenerContext ctx)
