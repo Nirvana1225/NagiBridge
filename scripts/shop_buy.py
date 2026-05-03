@@ -29,6 +29,8 @@ parser.add_argument("--chest-y", type=int, default=14)
 parser.add_argument("--return-x", type=int, default=58)
 parser.add_argument("--return-y", type=int, default=17)
 parser.add_argument("--port", type=int, default=7843)
+parser.add_argument("--skip-backpack-check", action="store_true",
+                    help="Skip screenshot backpack verification (caller already confirmed)")
 args = parser.parse_args()
 
 os.environ["NAGI_URL"] = f"http://localhost:{args.port}"
@@ -130,9 +132,15 @@ def run():
     total_needed = sum(count for _, count in items)
     api.log(f"=== Shopping: {len(items)} item types, {total_needed} total ===")
 
-    # Check inventory space
+    # Check inventory space — API can be inaccurate in multiplayer, so screenshot for verification
     free, used = count_free_slots()
-    api.log(f"Inventory: {used}/36 used, {free} free")
+    api.log(f"Inventory (API): {used}/36 used, {free} free")
+
+    if not args.skip_backpack_check:
+        img_path = api.screenshot()
+        api.log(f"BACKPACK_SCREENSHOT: {img_path}")
+        api.log("=== verify backpack has space, then re-run with --skip-backpack-check ===")
+        sys.exit(2)
 
     if free < MIN_FREE_SLOTS:
         api.log(f"Less than {MIN_FREE_SLOTS} free slots, storing to chest first...")
@@ -172,6 +180,10 @@ def run():
 
     if gold_before == gold_after and total_needed > 0:
         api.log("WARNING: no gold spent — purchase may have failed entirely!")
+
+    # Post-buy screenshot for verification
+    img_path = api.screenshot(os.path.join(os.path.expanduser("~"), "nagi", "post_buy_check.png"))
+    api.log(f"POST_BUY_SCREENSHOT: {img_path}")
 
     # Clear any remaining menus
     api.clear_menu()

@@ -7,13 +7,14 @@ INBOX="$HOME/nagi/overlay_inbox.jsonl"
 mkdir -p "$(dirname "$INBOX")"
 touch "$INBOX"
 
-# 杀旧的
+# 杀掉所有旧的channel server
 pkill -f "channel_server.py" 2>/dev/null
 sleep 0.5
 
-# 启动
+# 启动（不用nohup，跟随调用者生命周期）
 cd "$SCRIPT_DIR"
-nohup python channel_server.py > /dev/null 2>&1 &
+python channel_server.py &
+CHANNEL_PID=$!
 sleep 1
 
 if curl -s http://localhost:9000/ | grep -q "listening"; then

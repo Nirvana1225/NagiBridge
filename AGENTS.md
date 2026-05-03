@@ -9,7 +9,7 @@
 脚本在 scripts/ 目录下。所有 Python 脚本调用前必须加 PYTHONIOENCODING=utf-8。
 
 ## 可用脚本
-- farm_row.py — 种田（翻地+播种+浇水，蛇形走位）
+- farm_row.py — 种田（翻地+播种+浇水，蛇形走位，自带pre/post检查）
 - water_crops.py — 浇水（蛇形走位+实时水量检测）
 - chop_trees.py — 砍树（warp精准站位，树干+树桩一口气砍完）
 - clear_area.py — 开垦（两轮：move_to粗清 + warp精补）
@@ -18,24 +18,96 @@
 - keg_manager.py — 酿酒桶（扫描→收成品→装水果→卖）
 - furnace_manager.py — 熔炉（收锭→装矿+煤）
 - pet_animals.py — 撸动物（遍历所有动物，没撸的撸一遍）
+- fish_run.py — 钓鱼（配合Fishbot mod）
+- shop_buy.py — 购物（检查背包→存箱子→传送商店→购买→返回）
+- tool_agent.py — 独立tool-calling agent（LLM直接调17个游戏工具）
 - stardew_api.py — API helper
 
 所有脚本的 --port 参数用 7842。
 
 ## API 端点 (http://localhost:7842)
-/status, /state, /move, /stop, /face, /select,
-/use, /tool, /interact, /key, /chat, /emote,
-/surroundings, /map, /warp, /sleep, /wakeup,
-/queue, /buy, /harvest, /sell,
-/give, /money, /ripen, /refill, /pause, /resume,
+
+### 基础
+/status, /state, /move, /stop, /face, /select, /position
+
+### 操作
+/use, /tool, /interact, /key, /chat, /emote, /queue
+
+### 信息
+/surroundings, /map, /alerts, /scan
+
+### 导航
+/warp, /sleep, /wakeup
+
+### 商业
+/buy, /sell, /harvest, /store, /chest, /placechest, /fishbot
+
+### 菜单/制作/机器/动物
 /menu, /menu/click, /craft, /machines, /animals
 
-### 新端点说明
-- `/menu` GET — 菜单详情：类型、对话文本、选项列表(index/key/text)、商店物品、按钮坐标
-- `/menu/click` POST — 点菜单：`{option:0}` 选对话、`{button:"ok"}` 点按钮、`{x,y}` 点坐标
-- `/craft` POST — 制作物品：`{name:"Keg", count:5}` 自动检查配方和材料
-- `/machines` GET — 扫描当前地图所有BigCraftable机器，返回状态(empty/processing/ready)和内容
-- `/animals` GET — 动物详情：wasPetToday/friendship/happiness/fullness/productReady
+### 节日
+/festival, /festival/interact, /festival/answer
+
+### 小游戏
+/minigame/state, /minigame/bot
+
+### 游戏内聊天
+/chat/push, /chat/history
+
+### 作弊
+/give, /money, /heal, /ripen, /refill, /pause, /resume
+
+### 端点详细说明
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/status` | GET | 服务器状态、worldReady |
+| `/state` | GET | 玩家完整状态（HP/体力/位置/背包/菜单/事件） |
+| `/move` | POST | 寻路移动 `{x, y}` |
+| `/stop` | POST | 停止移动 |
+| `/face` | POST | 朝向 `{direction}` 0=上 1=右 2=下 3=左 |
+| `/select` | POST | 选择背包物品 `{name}` |
+| `/position` | POST | 直接设置位置（精确定位） |
+| `/tool` | POST | 使用工具 `{name}` 或 "current" |
+| `/use` | POST | 使用手持物品（放置类） |
+| `/interact` | POST | 与面前格子交互 |
+| `/key` | POST | 模拟按键（confirm/ok/cancel/skip/F1-F12） |
+| `/chat` | POST | 发聊天消息 |
+| `/emote` | POST | 播放表情 |
+| `/queue` | POST | 命令队列 |
+| `/surroundings` | GET | 扫描周围 `?radius=10` |
+| `/map` | GET | 地图信息 |
+| `/alerts` | GET/POST | 游戏内警告队列 |
+| `/scan` | GET | 扫描当前地图全部物体 |
+| `/warp` | POST | 传送 `{location, x?, y?}` 矿洞用 `UndergroundMine5` |
+| `/sleep` | POST | 睡觉 |
+| `/wakeup` | POST | 起床 |
+| `/buy` | POST | 购买 `{id, count, price?}` |
+| `/sell` | POST | 出售到shipping bin |
+| `/harvest` | POST | 收割作物 |
+| `/store` | POST | 存物品到箱子 `{x, y, name?}` |
+| `/chest` | POST | 管理箱子内容 |
+| `/placechest` | POST | 放置箱子 |
+| `/fishbot` | POST | 控制Fishbot `{action: "on"/"off"/"toggle"/"status"}` |
+| `/menu` | GET | 菜单详情：类型、对话文本、选项列表、商店物品、按钮坐标 |
+| `/menu/click` | POST | 点菜单 `{option:0}` / `{button:"ok"}` / `{x,y}` |
+| `/craft` | POST | 制作物品 `{name:"Keg", count:5}` |
+| `/machines` | GET | 扫描当前地图所有机器，返回状态(empty/processing/ready) |
+| `/animals` | GET | 动物详情：wasPetToday/friendship/happiness/fullness/productReady |
+| `/festival` | GET | 当前节日信息 |
+| `/festival/interact` | POST | 节日交互 |
+| `/festival/answer` | POST | 节日问答选项 |
+| `/minigame/state` | GET | 小游戏状态（JotPK/CalicoJack等） |
+| `/minigame/bot` | POST | 小游戏bot控制 |
+| `/chat/push` | POST | 推送消息到游戏内聊天面板 `{sender, message}` |
+| `/chat/history` | GET | 获取聊天历史 |
+| `/give` | POST | 给物品 `{id, count}` |
+| `/money` | POST | 加钱 `{amount}` |
+| `/heal` | POST | 满血满体力 |
+| `/ripen` | POST | 催熟作物 |
+| `/refill` | POST | 填满水壶 |
+| `/pause` | POST | 冻结时间 |
+| `/resume` | POST | 恢复时间 |
 
 ## 踩坑记录（重要！）
 1. farmhand 的 GetGrabTile 有偏移 → 统一站在目标格上方(y-1)面朝下操作
@@ -79,6 +151,13 @@ PYTHONIOENCODING=utf-8 python3 scripts/mine_run.py --start-level 1 --max-levels 
 - AutoCombat mod 自动打怪，脚本只管敲石头
 - 血量低或体力不足自动warp回Farm
 
+## 购物
+```bash
+PYTHONIOENCODING=utf-8 python3 scripts/shop_buy.py --items "493:10,491:6" --port 7842
+```
+- 自动检查背包→清理到箱子→传送商店→购买→传回农场
+- 物品格式: item_id:count，逗号分隔
+
 ## 重启游戏（加载新DLL时需要）
 ```powershell
 # 1. 关掉游戏
@@ -116,39 +195,51 @@ Fishbot mod 已安装，F5 开关自动钓鱼。流程：
 
 注意：钓鱼前确保背包有空位，鱼竿要在手上（用 /select 切换）
 
-## 游戏内聊天（MCP Channel）
+## 游戏内聊天（Chat V2）
 
-the player可以通过游戏overlay直接跟你聊天，不用看终端。
+游戏内按 ` 键打开聊天面板，支持两种模式：
 
-### 架构
+### API Mode
+直接在游戏内调LLM（DeepSeek/Claude/OpenAI/自定义），不需要CC。
+
+### Channel Mode（CC连接）
 ```
-[气泡 tkinter:7850] → POST → [channel server:9000] → MCP通知 → CC唤醒
-CC回复 → reply tool → chat_outbox.txt → 气泡轮询显示
+Game ChatHud → POST → channel_server.py (:9000) → inbox file → CC Monitor
+CC回复 → /chat/push (:7842) → Game ChatHud
 ```
 
-### 启动
-1. CC启动时加载channel：`claude --dangerously-load-development-channels server:game-overlay`
-2. 启动气泡：`python scripts/chat_overlay.py`
-3. channel server由MCP自动启动（配置在 `.mcp.json`）
+#### CC端启动步骤
+1. 后台启动channel server：`bash ~/source/NagiBridge/scripts/start_channel.sh`
+2. Monitor监听消息：`tail -f ~/nagi/overlay_inbox.jsonl | grep --line-buffered text`
+3. 用 `/chat/push` 回复：`curl -X POST http://localhost:7842/chat/push -d '{"sender":"Nagi","message":"Hello!"}'`
 
-### 文件
-- `server.ts` — MCP channel server（端口9000），接收气泡POST，通过MCP通知CC
-- `scripts/chat_overlay.py` — tkinter透明气泡，跟随游戏窗口左下角，输入框+气泡显示
-- `.mcp.json` — MCP server配置
-- `chat_outbox.txt` — CC回复的中转文件（reply tool写入，气泡轮询读取）
+### 聊天面板操作
+| 键 | 操作 |
+|---|---|
+| ` | 开/关聊天 |
+| Enter | 发送 |
+| Tab | 切换模式（输入框为空时） |
+| Ctrl+V | 粘贴 |
+| 滚轮 | 浏览历史 |
 
-### 收到channel消息时
-- 消息格式：`<channel source="game-overlay" chat_id="game1">内容</channel>`
-- 用 `reply` tool 回复，传回 chat_id 和 text
-- 如果是游戏操作指令（种田、浇水等），先执行再reply结果
+## 小游戏Bot
 
-### 气泡HTTP API（端口7850，仍可用）
-- `POST /message` — 直接推送气泡：`{"sender":"AI","text":"..."}`
-- `GET /inbox` — 读取the player输入（旧接口，channel模式下不用）
-- `POST /clear` — 清除气泡
+| 游戏 | 状态 | 说明 |
+|---|---|---|
+| 草原国王 (JotPK) | done | potential field自动操控 |
+| 21点 (CalicoJack) | done | reflection读牌面+基础策略 |
+
+用 `/minigame/state` 读状态，`/minigame/bot` 控制。
+
+## 节日活动
+
+用 `/festival` 读节日信息，`/festival/interact` 交互，`/festival/answer` 回答选项。
+独立bot在 `mods/NagiFestivalBots/`。
 
 ## git 同步
 代码更新后先 `git pull`，如果 DLL 变了就重启游戏。
 
 ## 参考
-完整技能文档见 scripts/SKILLS.md
+- 完整技能文档见 scripts/SKILLS.md
+- 项目总览见 PROJECT.md
+- 社区发布版见 README.md

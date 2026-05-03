@@ -270,19 +270,39 @@ def precheck_farm(seed_name):
 def precheck_area(tiles, radius=10):
     blocked = []
     data = surroundings(radius)
-    objects = data.get("objects", [])
-    terrain = data.get("terrain", [])
-    resource_clumps = data.get("resourceClumps", [])
     tile_set = set(tiles)
-    for obj in objects:
-        pos = (obj.get("x"), obj.get("y"))
-        if pos in tile_set:
-            blocked.append((pos, obj.get("name", "object")))
-    for t in terrain:
+    for t in data.get("tiles", []):
         pos = (t.get("x"), t.get("y"))
-        if pos in tile_set and "Tree" in t.get("type", ""):
-            blocked.append((pos, t.get("type", "terrain")))
+        if pos not in tile_set:
+            continue
+        obj_name = t.get("object", "")
+        terrain_name = t.get("terrain", "")
+        if obj_name:
+            blocked.append((pos, obj_name))
+        elif terrain_name and "Tree" in terrain_name:
+            blocked.append((pos, terrain_name))
     return blocked
+
+def screenshot(save_path=None):
+    import subprocess
+    if save_path is None:
+        save_path = os.path.join(os.path.expanduser("~"), "nagi", "screen_check.png")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    ps_script = f'''
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+$gfx = [System.Drawing.Graphics]::FromImage($bmp)
+$gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+$bmp.Save("{save_path}")
+$gfx.Dispose()
+$bmp.Dispose()
+'''
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps_script],
+                   capture_output=True, timeout=10)
+    return save_path
+
 
 def postcheck_menu():
     clear_menu()

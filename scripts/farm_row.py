@@ -144,16 +144,11 @@ def run():
 
     blocked = api.precheck_area(flat)
     if blocked:
-        api.log(f"WARNING: {len(blocked)} blocked tiles detected:")
+        api.log(f"BLOCKED: {len(blocked)} obstacles in planting area:")
         for pos, name in blocked:
             api.log(f"  ({pos[0]},{pos[1]}): {name}")
-        skip_set = {pos for pos, _ in blocked}
-        flat = [t for t in flat if t not in skip_set]
-        api.log(f"Skipping blocked tiles, {len(flat)} tiles remaining")
-
-    if not flat:
-        api.log("=== no valid tiles, aborting ===")
-        return
+        api.log("=== aborting — clear obstacles first or choose another area ===")
+        sys.exit(2)
 
     api.log(f"=== farm skill: {len(flat)}/{total} tiles, dir={args.dir}, rows={args.rows}, seed={args.seed} ===")
 
