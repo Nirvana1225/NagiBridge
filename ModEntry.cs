@@ -70,7 +70,7 @@ public class ModEntry : Mod
     public override void Entry(IModHelper helper)
     {
         _modConfig = helper.ReadConfig<ModConfig>();
-        _llmClient = new LlmClient(_modConfig);
+        _llmClient = new LlmClient(_modConfig, helper.DirectoryPath);
 
         helper.Events.GameLoop.GameLaunched += OnGameLaunched;
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
@@ -79,7 +79,29 @@ public class ModEntry : Mod
         helper.Events.Display.Rendered += OnRendered;
         helper.Events.Input.ButtonPressed += OnButtonPressed;
 
-        _chatHud = new ChatHud(Monitor, OnChatSend);
+        _chatHud = new ChatHud(Monitor, OnChatSend, OnApiConfigured, OnChannelSelected);
+        _chatHud.SetInitialState(_modConfig.Mode, _modConfig.ApiKey, _modConfig.ApiUrl);
+    }
+
+    private void OnApiConfigured(string apiKey, string apiUrl)
+    {
+        _modConfig!.ApiKey = apiKey;
+        _modConfig.ApiUrl = apiUrl;
+        _modConfig.Mode = "api";
+        if (apiUrl.Contains("deepseek")) _modConfig.ApiProvider = "deepseek";
+        else if (apiUrl.Contains("anthropic")) _modConfig.ApiProvider = "claude";
+        else if (apiUrl.Contains("openai.com")) _modConfig.ApiProvider = "openai";
+        else _modConfig.ApiProvider = "custom";
+        _llmClient = new LlmClient(_modConfig, Helper.DirectoryPath);
+        Helper.WriteConfig(_modConfig);
+        Monitor.Log($"API configured, provider={_modConfig.ApiProvider}, url={apiUrl}", LogLevel.Info);
+    }
+
+    private void OnChannelSelected()
+    {
+        _modConfig!.Mode = "cc";
+        Helper.WriteConfig(_modConfig);
+        Monitor.Log($"Channel mode selected", LogLevel.Info);
     }
 
     private void OnChatSend(string text)
@@ -98,13 +120,12 @@ public class ModEntry : Mod
                 else
                 {
                     var reply = await _llmClient!.SendAsync(text);
-                    _chatHud?.AddMessage("Nagi", reply);
+                    _chatHud?.AddMessage(_chatHud.AiDisplayName, reply);
                 }
             }
             catch (Exception ex)
             {
-                Monitor.Log($"Chat send error: {ex.Message}", LogLevel.Warn);
-                _chatHud?.AddMessage("System", $"[Error: {ex.Message}]");
+                Monitor.Log($"Chat send error: {ex.Message}", LogLevel.Debug);
             }
         });
     }
@@ -121,6 +142,8 @@ public class ModEntry : Mod
 
     private void OnButtonPressed(object? sender, ButtonPressedEventArgs e)
     {
+        if (e.Button == StardewModdingAPI.SButton.OemTilde)
+            Helper.Input.Suppress(e.Button);
         if (_chatHud?.IsOpen == true)
             Helper.Input.Suppress(e.Button);
     }
