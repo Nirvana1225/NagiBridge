@@ -1,5 +1,5 @@
 """
-种田skill：翻地 → 播种 → 浇水（蛇形走位，带体力/水量检测）
+种田skill：逐格完成 翻地→播种→浇水（蛇形走位，带体力/水量检测）
 
 用法:
     python farm_row.py <start_x> <start_y> <length> [options]
@@ -50,6 +50,14 @@ ROW_OFFSET = {
     "up":    (1, 0),
 }
 
+# facing direction when approaching from different sides
+FACE_FORWARD = {"right": 1, "left": 3, "down": 2, "up": 0}
+FACE_REVERSE = {"right": 3, "left": 1, "down": 0, "up": 2}
+
+# offset to stand adjacent to tile based on facing
+STAND_OFFSET_FORWARD = {"right": (-1, 0), "left": (1, 0), "down": (0, -1), "up": (0, 1)}
+STAND_OFFSET_REVERSE = {"right": (1, 0), "left": (-1, 0), "down": (0, 1), "up": (0, -1)}
+
 
 def calc_tiles(sx, sy, length, direction, rows, row_spacing):
     dx, dy = DIR_MAP[direction]
@@ -61,9 +69,10 @@ def calc_tiles(sx, sy, length, direction, rows, row_spacing):
             tx = sx + dx * i + rdx * r * row_spacing
             ty = sy + dy * i + rdy * r * row_spacing
             row.append((tx, ty))
-        if r % 2 == 1:
+        is_reverse = (r % 2 == 1)
+        if is_reverse:
             row.reverse()
-        tiles.append(row)
+        tiles.append((row, is_reverse))
     return tiles
 
 
@@ -80,58 +89,54 @@ def refill_water():
     result = api.refill_water()
     if result.get("ok"):
         api.log(f"refilled: {result.get('water')}/{result.get('max')}")
-        api.select("Watering Can")
-        time.sleep(0.15)
         return True
     api.log("could not refill")
     return False
 
 
-def do_phase(tiles, tool_or_item, phase_name):
-    api.log(f"--- {phase_name}: {tool_or_item} ---")
+def use_tool_at(tx, ty, tool_or_item, is_reverse, direction):
+    if is_reverse:
+        ox, oy = STAND_OFFSET_REVERSE[direction]
+        face = FACE_REVERSE[direction]
+    else:
+        ox, oy = STAND_OFFSET_FORWARD[direction]
+        face = FACE_FORWARD[direction]
+
+    api.move_to(tx + ox, ty + oy)
+    api.face(face)
+    time.sleep(0.1)
     api.select(tool_or_item)
-    time.sleep(0.15)
-
-    is_watering = (tool_or_item == "Watering Can")
-
-    for row in tiles:
-        for tx, ty in row:
-            if not check_stamina():
-                api.log(f"stopped at ({tx},{ty}) due to low stamina")
-                return False
-
-            if is_watering:
-                water, _ = api.watering_can_water()
-                if water is not None and water <= 0:
-                    if not refill_water():
-                        return False
-                    api.select("Watering Can")
-                    time.sleep(0.15)
-
-            api.move_to(tx, ty - 1)
-            api.face(2)
-            time.sleep(0.1)
-            api.use_item()
-            time.sleep(TOOL_DELAY)
-    return True
+    time.sleep(0.1)
+    api.use_item()
+    time.sleep(TOOL_DELAY)
 
 
 def run():
+    direction = args.dir
     tiles = calc_tiles(args.start_x, args.start_y, args.length,
-                       args.dir, args.rows, args.row_spacing)
-    total = sum(len(r) for r in tiles)
-    api.log(f"=== farm skill: {total} tiles, dir={args.dir}, rows={args.rows}, seed={args.seed} ===")
+                       direction, args.rows, args.row_spacing)
+    total = sum(len(row) for row, _ in tiles)
+    api.log(f"=== farm skill: {total} tiles, dir={direction}, rows={args.rows}, seed={args.seed} ===")
 
-    ok = do_phase(tiles, "Hoe", "till")
-    if not ok:
-        return
+    for row, is_reverse in tiles:
+        for tx, ty in row:
+            if not check_stamina():
+                api.log(f"stopped at ({tx},{ty}) due to low stamina")
+                return
 
-    ok = do_phase(tiles, args.seed, "plant")
-    if not ok:
-        return
+            # till
+            use_tool_at(tx, ty, "Hoe", is_reverse, direction)
 
-    if not args.skip_water:
-        do_phase(tiles, "Watering Can", "water")
+            # plant
+            use_tool_at(tx, ty, args.seed, is_reverse, direction)
+
+            # water
+            if not args.skip_water:
+                water, _ = api.watering_can_water()
+                if water is not None and water <= 0:
+                    if not refill_water():
+                        return
+                use_tool_at(tx, ty, "Watering Can", is_reverse, direction)
 
     api.log(f"=== done ===")
 
