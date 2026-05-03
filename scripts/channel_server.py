@@ -4,7 +4,7 @@ Channel server — 监听 localhost:9000，接收游戏聊天消息，写入 inb
 import json, os, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-INBOX = os.path.join(os.path.expanduser("~"), "nagi", "channel_inbox.jsonl")
+INBOX = os.path.join(os.path.expanduser("~"), "nagi", "overlay_inbox.jsonl")
 os.makedirs(os.path.dirname(INBOX), exist_ok=True)
 
 class Handler(BaseHTTPRequestHandler):
