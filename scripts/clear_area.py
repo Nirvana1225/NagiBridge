@@ -34,6 +34,7 @@ os.environ["NAGI_URL"] = f"http://localhost:{args.port}"
 import stardew_api as api
 
 TOOL_DELAY = 0.55
+STAMINA_MIN = 12
 
 TOOL_MAP = {
     "Weeds": ("Scythe", 1),
@@ -48,6 +49,48 @@ TOOL_MAP = {
 }
 
 TOOL_ORDER = ["Scythe", "Pickaxe", "Axe"]
+
+
+def tile_target_name(tile):
+    obj = tile.get("object", "")
+    terrain = tile.get("terrain", "")
+    resource = tile.get("resource", "")
+
+    if obj in TOOL_MAP:
+        return obj
+    if resource in TOOL_MAP:
+        return resource
+    if terrain and terrain.startswith("Tree:"):
+        return "Tree"
+    if terrain == "Grass":
+        return "Grass"
+    return None
+
+
+def inventory_counts():
+    counts = defaultdict(int)
+    for item in api.state().get("inventory", []):
+        name = item.get("name")
+        if name:
+            counts[name] += int(item.get("stack", 1))
+    return counts
+
+
+def log_inventory_delta(before, after):
+    gains = {}
+    for name in sorted(set(before) | set(after)):
+        delta = after.get(name, 0) - before.get(name, 0)
+        if delta:
+            gains[name] = delta
+    api.log(f"Inventory delta: {gains if gains else '{}'}")
+
+
+def stamina_ok():
+    cur, mx = api.player_stamina()
+    if cur < STAMINA_MIN:
+        api.log(f"Stamina low: {cur:.1f}/{mx:.0f}, stopping")
+        return False
+    return True
 
 
 def scan_area():
@@ -68,19 +111,8 @@ def scan_area():
         if x < args.x1 or x > args.x2 or y < args.y1 or y > args.y2:
             continue
 
-        obj = t.get("object", "")
-        terrain = t.get("terrain", "")
-        resource = t.get("resource", "")
-
-        if obj in TOOL_MAP:
-            name = obj
-        elif resource in TOOL_MAP:
-            name = resource
-        elif terrain and terrain.startswith("Tree:"):
-            name = "Tree"
-        elif terrain == "Grass":
-            name = "Grass"
-        else:
+        name = tile_target_name(t)
+        if not name:
             continue
 
         tool, hits = TOOL_MAP[name]
@@ -102,6 +134,30 @@ def snake_sort(items):
     return ordered
 
 
+def target_still_present(x, y, expected_name):
+    data = api.surroundings(2)
+    for t in data.get("tiles", []):
+        if t.get("x") == x and t.get("y") == y:
+            return tile_target_name(t) == expected_name
+    return False
+
+
+def stand_for_target(x, y, use_position):
+    stand_x, stand_y = x, y - 1
+    if use_position:
+        if api.current_location() == "Farm":
+            api._post("/position", {"x": stand_x, "y": stand_y})
+        else:
+            api.warp("Farm", stand_x, stand_y)
+        time.sleep(0.3)
+        api.face(2)
+    else:
+        api.move_to(stand_x, stand_y, timeout=8)
+        d = api.face_toward(x, y)
+        api.face(d)
+    time.sleep(0.1)
+
+
 def clear_pass(targets, use_warp=False):
     by_tool = defaultdict(list)
     for x, y, tool, name, hits in targets:
@@ -114,33 +170,30 @@ def clear_pass(targets, use_warp=False):
             continue
 
         items = snake_sort(items)
-        mode = "warp" if use_warp else "move"
+        mode = "position" if use_warp else "move"
         api.log(f"--- {tool}: {len(items)} targets ({mode}) ---")
         api.select(tool)
         time.sleep(0.15)
 
         for x, y, name, hits in items:
-            cur, mx = api.player_stamina()
-            if cur < 8:
-                api.log(f"Stamina empty, stopping")
+            if not stamina_ok():
                 return cleared
 
-            if use_warp:
-                if api.current_location() == "Farm":
-                    api._post("/position", {"x": x, "y": y - 1})
-                else:
-                    api.warp("Farm", x, y - 1)
-                time.sleep(0.3)
-                api.face(2)
-            else:
-                api.move_to(x, y - 1, timeout=8)
-                d = api.face_toward(x, y)
-                api.face(d)
-            time.sleep(0.1)
+            stand_for_target(x, y, use_warp)
 
+            actual_hits = 0
             for h in range(hits):
+                if not stamina_ok():
+                    return cleared
+                if h > 0 and not target_still_present(x, y, name):
+                    break
                 api.use_tool(tool)
                 time.sleep(TOOL_DELAY)
+                actual_hits += 1
+                if not target_still_present(x, y, name):
+                    break
+            if actual_hits < hits:
+                api.log(f"  {name} at ({x},{y}) cleared after {actual_hits}/{hits} hits")
 
             cleared += 1
             if cleared % 20 == 0:
@@ -149,8 +202,20 @@ def clear_pass(targets, use_warp=False):
     return cleared
 
 
+def pickup_sweep():
+    api.log("Pickup sweep...")
+    for y in range(args.y1, args.y2 + 1):
+        xs = range(args.x1, args.x2 + 1)
+        if (y - args.y1) % 2 == 1:
+            xs = reversed(list(xs))
+        for x in xs:
+            api.move_to(x, y, timeout=5)
+            time.sleep(0.12)
+
+
 def run():
     api.log(f"=== clear area: ({args.x1},{args.y1})-({args.x2},{args.y2}) ===")
+    inv_before = inventory_counts()
 
     # Pass 1: scan + fast clear with move_to
     targets = scan_area()
@@ -164,7 +229,7 @@ def run():
         api.log(f"Pass 1 done: cleared {n}")
 
     # Pass 2: rescan + precision clear with warp
-    remaining = scan_area()
+    remaining = scan_area() if stamina_ok() else []
     if remaining:
         by_type = defaultdict(int)
         for _, _, _, name, _ in remaining:
@@ -181,6 +246,9 @@ def run():
             api.log("All clear!")
     else:
         api.log("All clear after pass 1!")
+
+    pickup_sweep()
+    log_inventory_delta(inv_before, inventory_counts())
 
 
 if __name__ == "__main__":

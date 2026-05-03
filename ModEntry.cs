@@ -53,6 +53,18 @@ public class ModEntry : Mod
     private bool _timeFrozen;
     private int _frozenTime;
 
+    // Alert queue for game/system feedback consumed by external agents.
+    private readonly Queue<Dictionary<string, object?>> _alertQueue = new();
+    private readonly Dictionary<string, DateTime> _lastAlertTimes = new();
+    private readonly object _alertLock = new();
+    private string? _lastMenuType;
+    private string? _lastMenuText;
+    private string? _lastEventId;
+    private string? _lastEventText;
+    private bool _lastStaminaLow;
+    private bool _lastWaterEmpty;
+    private bool _lastInventoryFull;
+
     private readonly PrairieKingBot _prairieKingBot = new();
 
     private readonly FlowerDanceBot _flowerDanceBot = new();
@@ -179,6 +191,140 @@ public class ModEntry : Mod
         Game1.viewport.Y = Math.Max(0, Math.Min(maxY, vy));
     }
 
+    private void EnqueueAlert(string type, string message, string severity = "info", string source = "bridge")
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        var now = DateTime.UtcNow;
+        var key = $"{type}:{message}";
+
+        lock (_alertLock)
+        {
+            if (_lastAlertTimes.TryGetValue(key, out var last) && (now - last).TotalSeconds < 4)
+                return;
+            _lastAlertTimes[key] = now;
+
+            _alertQueue.Enqueue(new Dictionary<string, object?>
+            {
+                ["timeUtc"] = now.ToString("O"),
+                ["type"] = type,
+                ["severity"] = severity,
+                ["source"] = source,
+                ["message"] = message
+            });
+
+            while (_alertQueue.Count > 100)
+                _alertQueue.Dequeue();
+
+            foreach (var stale in _lastAlertTimes.Where(p => (now - p.Value).TotalMinutes > 5).Select(p => p.Key).ToList())
+                _lastAlertTimes.Remove(stale);
+        }
+    }
+
+    private void CaptureAlerts()
+    {
+        var farmer = Game1.player;
+        if (farmer == null)
+            return;
+
+        if (Game1.hudMessages != null)
+        {
+            foreach (var hud in Game1.hudMessages)
+            {
+                var text = hud.message;
+                if (!string.IsNullOrWhiteSpace(text))
+                    EnqueueAlert("hud", text, "info", "hud");
+            }
+        }
+
+        bool staminaLow = farmer.MaxStamina > 0 && farmer.Stamina / farmer.MaxStamina < 0.15f;
+        if (staminaLow && !_lastStaminaLow)
+            EnqueueAlert("stamina_low", $"Stamina low: {farmer.Stamina:0}/{farmer.MaxStamina:0}", "warning", "state");
+        else if (!staminaLow && _lastStaminaLow)
+            EnqueueAlert("stamina_ok", $"Stamina recovered: {farmer.Stamina:0}/{farmer.MaxStamina:0}", "info", "state");
+        _lastStaminaLow = staminaLow;
+
+        var wateringCan = farmer.Items.OfType<WateringCan>().FirstOrDefault();
+        bool waterEmpty = wateringCan != null && wateringCan.WaterLeft <= 0;
+        if (waterEmpty && !_lastWaterEmpty)
+            EnqueueAlert("water_empty", "Watering can is empty", "warning", "state");
+        else if (!waterEmpty && _lastWaterEmpty)
+            EnqueueAlert("water_refilled", "Watering can has water", "info", "state");
+        _lastWaterEmpty = waterEmpty;
+
+        int usedSlots = farmer.Items.Count(item => item != null);
+        bool inventoryFull = usedSlots >= farmer.MaxItems;
+        if (inventoryFull && !_lastInventoryFull)
+            EnqueueAlert("inventory_full", $"Inventory full: {usedSlots}/{farmer.MaxItems}", "warning", "state");
+        else if (!inventoryFull && _lastInventoryFull)
+            EnqueueAlert("inventory_space", $"Inventory has space: {usedSlots}/{farmer.MaxItems}", "info", "state");
+        _lastInventoryFull = inventoryFull;
+
+        CaptureMenuAlerts();
+        CaptureEventAlerts();
+    }
+
+    private void CaptureMenuAlerts()
+    {
+        var menu = Game1.activeClickableMenu;
+        string? menuType = menu?.GetType().Name;
+        string? menuText = null;
+
+        if (menu is DialogueBox dialogue)
+        {
+            try { menuText = dialogue.getCurrentString(); } catch { }
+        }
+        else if (menu != null)
+        {
+            menuText = menuType;
+        }
+
+        if (menuType != _lastMenuType)
+        {
+            if (menuType == null)
+                EnqueueAlert("menu_closed", "Menu closed", "info", "menu");
+            else
+                EnqueueAlert("menu_opened", $"Menu opened: {menuType}", "info", "menu");
+            _lastMenuType = menuType;
+            _lastMenuText = null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(menuText) && menuText != _lastMenuText)
+        {
+            EnqueueAlert("menu_text", menuText, "info", "menu");
+            _lastMenuText = menuText;
+        }
+    }
+
+    private void CaptureEventAlerts()
+    {
+        var ev = Game1.currentLocation?.currentEvent;
+        string? eventId = ev?.id;
+        string? eventText = null;
+
+        if (ev != null && Game1.activeClickableMenu is DialogueBox dialogue)
+        {
+            try { eventText = dialogue.getCurrentString(); } catch { }
+        }
+
+        if (eventId != _lastEventId)
+        {
+            if (eventId == null)
+                EnqueueAlert("event_ended", "Event ended", "info", "event");
+            else
+                EnqueueAlert("event_started", $"Event started: {eventId}", "info", "event");
+            _lastEventId = eventId;
+            _lastEventText = null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(eventText) && eventText != _lastEventText)
+        {
+            EnqueueAlert("event_text", eventText, "info", "event");
+            _lastEventText = eventText;
+        }
+    }
+
     private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
     {
         _chatHud?.Update();
@@ -226,6 +372,8 @@ public class ModEntry : Mod
             {
                 _winterStarBot.Update(time);
             }
+
+            CaptureAlerts();
         }
 
         // Process pathfinding movement
@@ -537,6 +685,7 @@ public class ModEntry : Mod
                 "/emote" => HandleEmote(ctx),
                 "/state" => HandleState(),
                 "/surroundings" => HandleSurroundings(ctx),
+                "/alerts" => HandleAlerts(ctx),
                 "/stop" => HandleStop(),
                 "/map" => HandleMap(),
                 "/buy" => HandleBuy(ctx),
@@ -1098,6 +1247,30 @@ public class ModEntry : Mod
             monsters = nearbyMonsters,
             farmers = nearbyFarmers
         };
+    }
+
+    /// <summary>
+    /// GET /alerts ?peek=true
+    /// Returns queued game/system alerts. By default this drains the queue.
+    /// </summary>
+    private object HandleAlerts(HttpListenerContext ctx)
+    {
+        var qs = ctx.Request.QueryString;
+        bool peek = bool.TryParse(qs["peek"], out var p) && p;
+
+        lock (_alertLock)
+        {
+            var alerts = _alertQueue.ToList();
+            if (!peek)
+                _alertQueue.Clear();
+
+            return new
+            {
+                ok = true,
+                count = alerts.Count,
+                alerts
+            };
+        }
     }
 
     /// <summary>
@@ -1779,9 +1952,14 @@ public class ModEntry : Mod
                                 }
                             }
                             break;
+                        case "menu":
+                            if (Game1.activeClickableMenu != null)
+                                Game1.activeClickableMenu.receiveKeyPress(Keys.Escape);
+                            else
+                                Game1.activeClickableMenu = new GameMenu();
+                            break;
                         case "cancel":
                         case "back":
-                        case "menu":
                             if (Game1.activeClickableMenu != null)
                                 Game1.activeClickableMenu.receiveKeyPress(Keys.Escape);
                             else if (Game1.input != null)
