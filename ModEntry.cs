@@ -1611,6 +1611,21 @@ public class ModEntry : Mod
                     return;
                 }
 
+                // Check inventory space
+                int freeSlots = 0;
+                for (int i = 0; i < farmer.MaxItems; i++)
+                {
+                    if (i >= farmer.Items.Count || farmer.Items[i] == null)
+                        freeSlots++;
+                }
+                if (freeSlots < 1)
+                {
+                    tcs.SetResult(new { ok = false, error = "Inventory full! Please clear backpack before buying.",
+                        freeSlots = 0 });
+                    EnqueueAlert("inventory_full", "Cannot buy: inventory is full. Clear backpack first.", "warning", "buy");
+                    return;
+                }
+
                 // Create the actual item and add to inventory
                 var item = ItemRegistry.Create(qualifiedId, quantity);
                 farmer.Money -= totalCost;
