@@ -12,26 +12,15 @@
     <Compile Remove="mods\NagiFestivalBots\FestivalModEntry.cs" />
   </ItemGroup>
 
+  <!--
+    Pathoschild.Stardew.ModBuildConfig auto-detects the local Stardew Valley
+    install (Steam / GOG / Xbox, on Windows / macOS / Linux) and references
+    Stardew Valley.dll, SMAPI, MonoGame, xTile and Harmony for you, so there
+    are no machine-specific paths to edit. Override the path if auto-detect
+    fails: set the GamePath property or a GAME_PATH environment variable.
+    Docs: https://github.com/Pathoschild/SMAPI/blob/develop/docs/technical/mod-package.md
+  -->
   <ItemGroup>
-    <Reference Include="Stardew Valley">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\Stardew Valley.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="StardewModdingAPI">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\StardewModdingAPI.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="MonoGame.Framework">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\MonoGame.Framework.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="xTile">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\xTile.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="0Harmony">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\smapi-internal\0Harmony.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.*" />
   </ItemGroup>
 </Project>

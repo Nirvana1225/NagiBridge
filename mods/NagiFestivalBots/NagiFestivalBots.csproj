@@ -7,21 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="Stardew Valley">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\Stardew Valley.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="StardewModdingAPI">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\StardewModdingAPI.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="MonoGame.Framework">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\MonoGame.Framework.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="xTile">
-      <HintPath>E:\SteamLibrary\steamapps\common\Stardew Valley\xTile.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.*" />
   </ItemGroup>
 </Project>

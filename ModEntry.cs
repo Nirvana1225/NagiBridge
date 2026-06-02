@@ -1807,6 +1807,11 @@ public class ModEntry : Mod
         if (!Context.IsWorldReady)
             throw new InvalidOperationException("World not ready");
 
+        var shopLocations = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "SeedShop", "FishShop", "Blacksmith", "ScienceHouse", "AnimalShop", "Saloon", "AdventureGuild", "Hospital", "HatShop", "DesertTrade", "QiGemShop" };
+        if (shopLocations.Contains(location) && Game1.player.freeSpotsInInventory() == 0)
+            return new { ok = false, error = "Inventory full! Clear backpack before going to a shop.", freeSlots = 0 };
+
         var tcs = new TaskCompletionSource<object>();
         EnqueueMainThread(() =>
         {

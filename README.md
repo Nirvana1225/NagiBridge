@@ -2,13 +2,31 @@
 
 Stardew Valley SMAPI mod — HTTP API for external control + in-game AI chat.
 
-## Install
+## Install (players)
+
+> ### 📥 [**Download the latest release →**](https://github.com/anqinou-art/NagiBridge/releases/latest)
+>
+> Grab `NagiBridge.zip` from the link above — it already contains the compiled `NagiBridge.dll`. **You do not need to build anything.**
 
 1. Install [SMAPI](https://smapi.io/)
-2. Copy `NagiBridge.dll` + `manifest.json` to `Stardew Valley/Mods/NagiBridge/`
-3. Launch game via SMAPI
+2. Download `NagiBridge.zip` from [**Releases**](https://github.com/anqinou-art/NagiBridge/releases/latest) and unzip it
+3. Move the unzipped `NagiBridge` folder into your `Stardew Valley/Mods/` folder
+   (so you end up with `Stardew Valley/Mods/NagiBridge/NagiBridge.dll` + `manifest.json`)
+4. Launch the game through SMAPI
 
-First launch auto-generates `config.json`.
+First launch auto-generates `config.json`. The mod is built for **Stardew Valley 1.6+ / SMAPI 4.0+** and the same `.dll` works on **Windows, macOS and Linux**.
+
+> **Cloning the source repo?** There is **no `.dll` in the source tree** — it ships only in [Releases](https://github.com/anqinou-art/NagiBridge/releases/latest). If you cloned/downloaded the code and SMAPI says it can't find `NagiBridge.dll`, download the release zip above, or build it yourself (see below).
+
+## Build from source (developers)
+
+Requires the [.NET SDK](https://dotnet.microsoft.com/download) (6.0+) and a local Stardew Valley install.
+
+```bash
+dotnet build -c Release
+```
+
+The project uses [`Pathoschild.Stardew.ModBuildConfig`](https://github.com/Pathoschild/SMAPI/blob/develop/docs/technical/mod-package.md), which **auto-detects your game folder** (Steam / GOG / Xbox on any OS) and copies the built mod straight into `Stardew Valley/Mods/NagiBridge/`. No paths to edit. If auto-detection fails, set a `GamePath` property or `GAME_PATH` environment variable pointing at your install.
 
 ## HTTP API
 
